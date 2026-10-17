@@ -49,6 +49,7 @@ INSTALLED_APPS = [
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     "django.middleware.common.CommonMiddleware",
+    "api.middleware.FrontendCorsMiddleware",
 ]
 
 ROOT_URLCONF = "config.urls"
@@ -60,6 +61,9 @@ DATABASES: dict[str, dict[str, str]] = {}
 # Multiplier applied to provider drive times to approximate a loaded truck.
 TRUCK_TIME_FACTOR = float(os.environ.get("TRUCK_TIME_FACTOR", "1.1"))
 MAPBOX_TOKEN = os.environ.get("MAPBOX_TOKEN", "")
+FRONTEND_ORIGIN = os.environ.get("FRONTEND_ORIGIN", "").strip().rstrip("/")
+
+REST_FRAMEWORK = {"EXCEPTION_HANDLER": "api.errors.exception_handler"}
 
 USE_TZ = True
 STATIC_URL = "static/"
