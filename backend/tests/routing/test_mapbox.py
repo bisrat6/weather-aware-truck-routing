@@ -11,6 +11,7 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from routing import mapbox
+from routing.checkpoints import sample_checkpoints
 from routing.errors import (
     MapboxAuthError,
     MapboxConnectionError,
@@ -534,3 +535,88 @@ def test_segment_lengths_helper_is_used_for_proportional_split():
     seg = [b - a for a, b in pairwise(route.cum_dist_m)]
     ratios = [s / g for s, g in zip(seg, geo, strict=True) if g > 0]
     assert max(ratios) == pytest.approx(min(ratios), rel=1e-9)
+
+
+# ------------------------------------------------------------------ edge-case routes
+
+
+def _payload(coords_lon_lat, leg):
+    """A one-route, one-leg Mapbox payload."""
+    return {
+        "code": "Ok",
+        "routes": [
+            {
+                "distance": leg["distance"],
+                "duration": leg["duration"],
+                "geometry": {"coordinates": coords_lon_lat},
+                "legs": [leg],
+            }
+        ],
+    }
+
+
+def test_one_segment_route_with_annotations():
+    leg = {
+        "distance": 1000.0,
+        "duration": 100.0,
+        "annotation": {"distance": [1000.0], "duration": [100.0]},
+    }
+    (route,) = parse_routes(_payload([[-100.0, 40.0], [-99.9, 40.1]], leg), truck_time_factor=1.1)
+    assert route.eta_method == "annotations"
+    assert route.coords == [(40.0, -100.0), (40.1, -99.9)]
+    assert route.cum_dist_m == [0.0, 1000.0]
+    assert route.cum_dur_s == pytest.approx([0.0, 110.0])
+    cps = sample_checkpoints(route, 10)
+    assert len(cps) == 2
+    assert (cps[0].lat, cps[0].lon) == (40.0, -100.0)
+    assert (cps[1].lat, cps[1].lon) == (40.1, -99.9)
+
+
+def test_one_segment_route_without_annotations_is_proportional():
+    leg = {"distance": 1000.0, "duration": 100.0}
+    (route,) = parse_routes(_payload([[-100.0, 40.0], [-99.9, 40.1]], leg), truck_time_factor=1.1)
+    assert route.eta_method == "proportional"
+    assert route.cum_dist_m == pytest.approx([0.0, 1000.0])
+    assert route.cum_dur_s == pytest.approx([0.0, 110.0])
+
+
+def test_origin_equals_destination_zero_length_route(fake_get):
+    # Assumes Mapbox answers with a zero-length route; it may instead return NoRoute.
+    point = [-111.891, 40.7608]
+    leg = {
+        "distance": 0.0,
+        "duration": 0.0,
+        "annotation": {"distance": [0.0], "duration": [0.0]},
+    }
+    fake_get(FakeResponse(body=_payload([point, point], leg)))
+    (route,) = get_routes((40.7608, -111.891), (40.7608, -111.891), TOKEN)
+    assert route.eta_method == "annotations"
+    assert route.cum_dist_m == [0.0, 0.0]
+    assert route.cum_dur_s == [0.0, 0.0]
+    cps = sample_checkpoints(route, 25)
+    assert len(cps) == 2
+    assert all((c.lat, c.lon) == (40.7608, -111.891) for c in cps)
+    assert all(c.dist_mi == 0 and c.owned_mi == 0 for c in cps)
+
+
+def test_duplicate_consecutive_coordinates_with_annotations():
+    coords = [[0.0, 0.0], [1.0, 0.0], [1.0, 0.0], [3.0, 0.0]]  # segment 2 has zero length
+    leg = {
+        "distance": 3000.0,
+        "duration": 300.0,
+        "annotation": {"distance": [1000.0, 0.0, 2000.0], "duration": [100.0, 0.0, 200.0]},
+    }
+    (route,) = parse_routes(_payload(coords, leg), truck_time_factor=1.0)
+    assert route.eta_method == "annotations"
+    assert len(route.coords) == len(route.cum_dist_m) == len(route.cum_dur_s) == 4
+    assert route.cum_dist_m == [0.0, 1000.0, 1000.0, 3000.0]
+    assert route.cum_dur_s == [0.0, 100.0, 100.0, 300.0]
+
+
+def test_duplicate_consecutive_coordinates_proportional():
+    coords = [[0.0, 0.0], [1.0, 0.0], [1.0, 0.0], [3.0, 0.0]]  # 1 deg, 0, 2 deg along the equator
+    leg = {"distance": 3000.0, "duration": 300.0}  # no annotation -> proportional
+    (route,) = parse_routes(_payload(coords, leg), truck_time_factor=1.0)
+    assert route.eta_method == "proportional"
+    assert route.cum_dist_m == pytest.approx([0.0, 1000.0, 1000.0, 3000.0], rel=1e-3)
+    assert route.cum_dur_s == pytest.approx([0.0, 100.0, 100.0, 300.0], rel=1e-3)
