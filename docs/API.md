@@ -101,6 +101,38 @@ server-side `MAPBOX_TOKEN`; returns up to 5 results.
 
 Provider errors use the standard error shape and never expose the token or upstream URL.
 
+## `POST /api/heatmap`
+
+Request body:
+
+```json
+{
+  "geometry": [[40.7128, -74.0060], [40.5, -73.8]],
+  "departure_utc": "2026-10-18T12:00:00Z",
+  "load_lb": 34000
+}
+```
+
+`geometry` is an ordered list of at least two `[latitude, longitude]` WGS84 pairs copied
+from a route's GeoJSON geometry. `departure_utc` and `load_lb` use the same validation
+window and inclusive 0–100,000 lb range as `/api/analyze`. The service samples along the
+corridor and caps the output at 150 points. Hours are 49 consecutive UTC forecast hours;
+hour 0 is the nearest forecast hour to `departure_utc`, using the same nearest-hour rule
+as route checkpoint ETAs.
+
+```json
+{
+  "hours": ["2026-10-18T12:00:00Z", "2026-10-18T13:00:00Z"],
+  "points": [{"lat": 40.7, "lon": -74.0, "risk": [0, 1, null]}]
+}
+```
+
+Each risk entry is an integer from 0 (Low) through 4 (No Travel), or `null` when any
+required weather variable is missing for that point and hour. Missing weather is never
+encoded as Low. Weather is fetched through the shared grid cache and risk is scored with
+the same load-aware risk engine as route checkpoints. Validation and upstream errors use
+the standard error shape above; provider details, URLs and credentials are sanitized.
+
 ## `GET /api/health`
 
 Liveness response:

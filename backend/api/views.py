@@ -20,8 +20,13 @@ from rest_framework.response import Response
 from analysis import analyze_route, rank_routes
 from api.errors import APIError
 from api.geocoding import fetch_geocodes
+from api.heatmap import build_heatmap
 from api.serializers import serialize_route
-from api.validation import AnalyzeRequestSerializer, validate_geocode_query
+from api.validation import (
+    AnalyzeRequestSerializer,
+    HeatmapRequestSerializer,
+    validate_geocode_query,
+)
 from routing.errors import MapboxError, MapboxRateLimitError
 from routing.mapbox import get_routes
 from weather.errors import WeatherError, WeatherRateLimitError
@@ -123,3 +128,28 @@ def geocode(request: Request) -> Response:
     except MapboxError:
         raise APIError("geocoding_unavailable", "Geocoding service is unavailable.", 502) from None
     return Response({"results": results})
+
+
+@api_view(["POST"])
+@authentication_classes([])
+@permission_classes([])
+@renderer_classes([JSONRenderer])
+def heatmap(request: Request) -> Response:
+    serializer = HeatmapRequestSerializer(
+        data=request.data, context={"now": timezone.now().astimezone(UTC)}
+    )
+    serializer.is_valid(raise_exception=True)
+    data = serializer.validated_data
+    try:
+        result = build_heatmap(
+            data["geometry"], data["departure_utc"], data["load_lb"], _weather_service
+        )
+    except WeatherRateLimitError as exc:
+        raise APIError(
+            "rate_limited",
+            "Weather service rate limit exceeded." + _retry_hint(exc.retry_after),
+            429,
+        ) from None
+    except WeatherError:
+        raise APIError("weather_unavailable", "Weather service is unavailable.", 502) from None
+    return Response(result)

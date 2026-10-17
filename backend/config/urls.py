@@ -2,7 +2,7 @@
 
 from django.urls import URLPattern, URLResolver, re_path
 
-from api.views import analyze, geocode
+from api.views import analyze, geocode, heatmap
 from config.views import health
 
 urlpatterns: list[URLPattern | URLResolver] = [
@@ -10,4 +10,5 @@ urlpatterns: list[URLPattern | URLResolver] = [
     re_path(r"^api/health/?$", health, name="health"),
     re_path(r"^api/analyze/?$", analyze, name="analyze"),
     re_path(r"^api/geocode/?$", geocode, name="geocode"),
+    re_path(r"^api/heatmap/?$", heatmap, name="heatmap"),
 ]
