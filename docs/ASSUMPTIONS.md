@@ -67,3 +67,10 @@ Bands are half-open `[lo, hi)` unless noted. Each shared edge belongs to the hig
 34. **Grid cache.** Coordinates snap to a 0.1 degree cell (nearest centre, halves round up) and Open-Meteo is asked for the cell centre, so one cached value serves every point in the cell. Entries are keyed by (cell, UTC hour), live 45 minutes, and the cache holds at most 50,000 entries (oldest, expired first, dropped beyond that). It is thread-safe and its clock is injectable.
 35. **Requests over 100 points are split.** The Open-Meteo docs do not state a per-request cap, so 100 is a conservative choice, not a documented limit.
 36. **Model selection is left to Open-Meteo's default (`best_match`).** The model actually used for a point is not recorded.
+
+## Analysis (`backend/analysis/`)
+
+37. **Missing weather has no risk level.** It is flagged on its checkpoint and counted in the summary; its owned miles are not assigned to any risk bucket or included in the distance-weighted average risk. This avoids treating unknown weather as Low.
+38. **Average risk uses known-weather miles only**, weighted by `owned_mi` on the 0-4 risk scale. If every checkpoint is missing, average risk and maximum level are `None`.
+39. **Ranking tie handling.** No Travel routes sort after every route without No Travel; among blocked routes, exact No Travel miles are compared first, followed by Severe and High miles rounded to whole miles, average risk rounded to 2 decimals, then exact duration seconds. Stable input order resolves exact ties. A route with no known-weather miles has unknown average risk and sorts after routes with a calculable average.
+40. **Route summary duration uses the normalized route's provider duration** (already truck-factor adjusted by routing); checkpoint ETAs use the cumulative segment duration offsets.
