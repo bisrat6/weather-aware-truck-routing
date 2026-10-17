@@ -87,7 +87,8 @@ When fewer than three routes are returned, `notices` includes
 Validation errors return HTTP 400. Invalid, unavailable, or expired Mapbox route requests
 return HTTP 502. Weather service failures return HTTP 502; rate limits return HTTP 429 and
 include a retry hint if one is supplied. Missing weather at individual checkpoints remains
-in the successful response as `weather_missing: true`.
+in the successful response as `weather_missing: true`. An unset `MAPBOX_TOKEN` returns HTTP
+503 with a configuration error.
 
 ## `GET /api/geocode?q=`
 
