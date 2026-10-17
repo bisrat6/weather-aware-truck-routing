@@ -35,7 +35,9 @@ Bands are half-open `[lo, hi)` unless noted. Each shared edge belongs to the hig
 
 13. **Every non-LOW level gets a reason.** The format is `"<factor> <value> <unit>: <Level>"`. Load escalations append the load, for example `"wind 45.0 mph, load 34,000 lb: No Travel"`. Tests check that the reason names the factor and the level, not the exact string.
 
+14. **`wind_level` includes load escalation.** The load rules are conditions on wind speed, so `CheckpointRisk.wind_level` is the wind band raised by any load rule. This keeps `level == max(wind_level, rain_level, snow_level)` true. It is an API design choice, not something the brief states.
+
 ## Not decided here
 
-14. **Wind is treated as a single value.** The brief doesn't say whether it means sustained wind or gusts, and that choice belongs to the later weather-fetching work.
-15. **Snow rate is treated as a single value in in/hr.** The brief doesn't say whether it means liquid-equivalent or depth.
+15. **Wind is treated as a single value.** The brief doesn't say whether it means sustained wind or gusts, and that choice belongs to the later weather-fetching work.
+16. **Snow rate is treated as a single value in in/hr.** The brief doesn't say whether it means liquid-equivalent or depth.
