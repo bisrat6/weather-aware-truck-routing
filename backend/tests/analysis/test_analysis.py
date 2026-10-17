@@ -23,10 +23,18 @@ class StubWeather:
         return self.samples
 
 
-def result(label, miles, avg=1.0, duration=1000):
+def result(label, miles, avg=1.0, duration=1000, missing_count=0, missing_miles=0.0):
     by_level = {level: 0.0 for level in RiskLevel}
     by_level.update(miles)
-    summary = RouteSummary(by_level, max(miles, key=miles.get), avg, duration, "annotations", 0)
+    summary = RouteSummary(
+        by_level,
+        max(miles, key=miles.get),
+        avg,
+        duration,
+        "annotations",
+        missing_count,
+        missing_miles,
+    )
     return RouteResult((), summary, label)
 
 
@@ -68,9 +76,64 @@ def test_missing_weather_is_flagged_counted_and_not_scored_as_low():
     assert scored.checkpoints[0].weather_missing
     assert scored.checkpoints[0].risk_level is None
     assert scored.summary.missing_weather_count == 1
+    assert scored.summary.missing_weather_miles == pytest.approx(
+        math.fsum(cp.owned_mi for cp in scored.checkpoints if cp.weather_missing)
+    )
     assert scored.summary.miles_by_level[RiskLevel.LOW] < math.fsum(
         cp.owned_mi for cp in scored.checkpoints
     )
+    risk_and_missing_miles = (
+        math.fsum(scored.summary.miles_by_level.values())
+        + scored.summary.missing_weather_miles
+    )
+    assert risk_and_missing_miles == pytest.approx(
+        math.fsum(cp.owned_mi for cp in scored.checkpoints)
+    )
+
+
+def test_incomplete_route_with_fewer_severe_miles_ranks_below_complete_route():
+    complete = result("complete", {RiskLevel.SEVERE: 5, RiskLevel.LOW: 95}, avg=0.5)
+    incomplete = result(
+        "incomplete", {RiskLevel.LOW: 100}, avg=0.0, missing_count=1, missing_miles=10
+    )
+    ranked = rank_routes([incomplete, complete])
+    assert ranked.recommended == complete
+    assert "incomplete weather data" in ranked.reason
+    assert "not recommended because" in ranked.reason
+    assert "10.0 miles" in ranked.reason
+    assert "1 checkpoints" in ranked.reason
+
+
+def test_two_incomplete_routes_use_the_existing_risk_order():
+    fewer_severe = result(
+        "fewer severe", {RiskLevel.SEVERE: 1, RiskLevel.LOW: 90}, missing_count=2, missing_miles=9
+    )
+    more_severe = result(
+        "more severe", {RiskLevel.SEVERE: 2, RiskLevel.LOW: 90}, missing_count=1, missing_miles=8
+    )
+    assert rank_routes([more_severe, fewer_severe]).recommended == fewer_severe
+
+
+def test_entirely_missing_route_has_all_miles_unclassified_and_reason_discloses_it():
+    route = parse_routes(json.loads((FIXTURES / "mapbox_slc_provo.json").read_text()))[0]
+    n = math.ceil(route.cum_dist_m[-1] / 1609.344 / 50) + 1
+    missing = [MissingWeather(None, "fixture missing")] * n
+    scored = analyze_route(
+        route,
+        datetime(2026, 10, 17, tzinfo=UTC),
+        50,
+        0,
+        StubWeather(missing),
+    )
+    total = math.fsum(cp.owned_mi for cp in scored.checkpoints)
+    assert scored.summary.missing_weather_count == n
+    assert scored.summary.missing_weather_miles == pytest.approx(total)
+    assert math.fsum(scored.summary.miles_by_level.values()) == pytest.approx(0)
+    assert scored.summary.average_risk is None
+    ranked = rank_routes([scored])
+    assert "incomplete weather data" in ranked.reason
+    assert f"{total:.1f} miles" in ranked.reason
+    assert f"{n} checkpoints" in ranked.reason
 
 
 def test_rank_no_travel_last_then_no_travel_miles_and_criteria_ties():

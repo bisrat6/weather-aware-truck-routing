@@ -33,6 +33,7 @@ class RouteSummary:
     duration_s: float
     eta_method: str
     missing_weather_count: int
+    missing_weather_miles: float
 
 
 @dataclass(frozen=True)
