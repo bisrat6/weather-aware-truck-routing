@@ -41,3 +41,16 @@ Bands are half-open `[lo, hi)` unless noted. Each shared edge belongs to the hig
 
 15. **Wind is treated as a single value.** The brief doesn't say whether it means sustained wind or gusts, and that choice belongs to the later weather-fetching work.
 16. **Snow rate is treated as a single value in in/hr.** The brief doesn't say whether it means liquid-equivalent or depth.
+
+## Routing (`backend/routing/`)
+
+17. **`distance_m` / `duration_s` are the provider's totals; checkpoints use the cumulative arrays only.** Mapbox rounds annotation values, so `cum_*[-1]` can differ slightly from the totals. Checkpoint logic reads only `cum_dist_m` / `cum_dur_s`, so `sum(owned_mi)` equals `cum_dist_m[-1]` in miles exactly (to float precision).
+18. **`TRUCK_TIME_FACTOR` (default 1.1) multiplies durations only**, both annotation durations and the route total. Distances are untouched. It is a parameter of `get_routes` / `parse_routes`, and `config/settings.py` reads it from the environment.
+19. **A leg's annotations are usable only if** both lists exist, each has exactly `coordinates - 1` entries, and every entry is a finite non-negative number. Otherwise that leg gets proportional durations: the provider's leg duration (times the factor) is split in proportion to geodesic segment length, and distances are scaled to the provider's leg distance. One bad leg makes the whole route `eta_method="proportional"`.
+20. **Multi-leg responses.** The two-waypoint request used by `get_routes` returns one leg per route. If a response ever has several legs, the geometry is split using the legs' annotation counts (a leg with k entries covers k segments); if the counts do not add up, the whole route is treated as one proportional leg. Joined legs share their joint point, which is dropped once.
+21. **`join_routes` assumes the end of one piece is the start of the next** and always drops the next piece's first point. It does not check that the two points are close.
+22. **Checkpoint placement.** Points sit at 0, interval, 2 x interval, ... plus the destination, so the last gap is shorter than the interval unless the route length is an exact multiple (within 1e-9). If that gives more than `max_points`, the interval is coarsened to `total / (max_points - 1)`, which yields exactly `max_points` evenly spaced points.
+23. **Interpolation is linear in lat/lon** between route points. That is accurate for road geometry (segments are short) but not for routes that cross the antimeridian.
+24. **Errors never contain the access token.** Network exceptions from `requests` are not chained, because their text includes the full URL with `access_token`.
+25. **The distance check is not wired into `get_routes`.** `check_route_distance` returns a result (default tolerance 5%) and callers decide what to do with a mismatch.
+26. **Hand-built fixture.** `tests/fixtures/mapbox_handbuilt_*.json` uses the real response shape with synthetic numbers. No real Mapbox response has been recorded or tested yet.
