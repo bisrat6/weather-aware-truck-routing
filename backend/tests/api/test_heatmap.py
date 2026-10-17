@@ -129,21 +129,23 @@ def test_heatmap_validation_errors(client, monkeypatch, updates, message):
 
 
 @pytest.mark.parametrize(
-    ("status", "code", "retry"),
-    [(503, "weather_unavailable", None), (429, "rate_limited", 23)],
+    ("upstream_status", "expected_status", "code", "retry"),
+    [(503, 502, "weather_unavailable", None), (429, 429, "rate_limited", 23)],
 )
-def test_heatmap_weather_errors_are_sanitized(client, monkeypatch, status, code, retry):
+def test_heatmap_weather_errors_are_sanitized(
+    client, monkeypatch, upstream_status, expected_status, code, retry
+):
     secret = "do-not-leak https://api.open-meteo.com/token"
     def get(url, params=None, timeout=None):
         return FakeResponse(
-            status,
+            upstream_status,
             {"reason": secret},
             {"Retry-After": str(retry)} if retry else {},
         )
 
     monkeypatch.setattr("requests.get", get)
     response = client.post("/api/heatmap", request_body(), format="json")
-    assert response.status_code == status
+    assert response.status_code == expected_status
     assert response.json()["error"]["code"] == code
     assert secret not in response.content.decode()
     assert "open-meteo.com" not in response.content.decode()
