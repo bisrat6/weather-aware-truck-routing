@@ -3,11 +3,41 @@
 import os
 from pathlib import Path
 
+from django.core.exceptions import ImproperlyConfigured
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "insecure-dev-only-key")
-DEBUG = os.environ.get("DJANGO_DEBUG", "false").lower() == "true"
-ALLOWED_HOSTS = [h for h in os.environ.get("DJANGO_ALLOWED_HOSTS", "").split(",") if h]
+
+def _env_bool(name: str) -> bool:
+    """True only for an explicit truthy value; anything else (or unset) is False."""
+    return os.environ.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _env_list(name: str) -> list[str]:
+    return [item.strip() for item in os.environ.get(name, "").split(",") if item.strip()]
+
+
+# Safe by default: DEBUG is off unless DJANGO_DEBUG is explicitly truthy.
+DEBUG = _env_bool("DJANGO_DEBUG")
+
+# The dev key below is public (it is in the repo), so it is only ever used when DEBUG is on.
+# Outside DEBUG a real key is required and startup fails without one.
+_DEV_SECRET_KEY = "insecure-dev-only-key"
+SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "")
+if not SECRET_KEY:
+    if not DEBUG:
+        raise ImproperlyConfigured(
+            "DJANGO_SECRET_KEY is not set. Set it, or set DJANGO_DEBUG=true for local development."
+        )
+    SECRET_KEY = _DEV_SECRET_KEY
+
+ALLOWED_HOSTS = _env_list("DJANGO_ALLOWED_HOSTS")
+# Render sets RENDER_EXTERNAL_HOSTNAME to the service's public hostname automatically.
+_render_host = os.environ.get("RENDER_EXTERNAL_HOSTNAME", "").strip()
+if _render_host and _render_host not in ALLOWED_HOSTS:
+    ALLOWED_HOSTS.append(_render_host)
+if DEBUG and not ALLOWED_HOSTS:
+    ALLOWED_HOSTS = ["localhost", "127.0.0.1", "[::1]"]
 
 INSTALLED_APPS = [
     "django.contrib.contenttypes",
