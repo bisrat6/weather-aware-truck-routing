@@ -26,6 +26,10 @@ WSGI_APPLICATION = "config.wsgi.application"
 # No models in this project.
 DATABASES: dict[str, dict[str, str]] = {}
 
+# Multiplier applied to provider drive times to approximate a loaded truck.
+TRUCK_TIME_FACTOR = float(os.environ.get("TRUCK_TIME_FACTOR", "1.1"))
+MAPBOX_TOKEN = os.environ.get("MAPBOX_TOKEN", "")
+
 USE_TZ = True
 STATIC_URL = "static/"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
