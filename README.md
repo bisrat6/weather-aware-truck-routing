@@ -1,7 +1,7 @@
 # Weather-Aware Truck Routing
 
 React + Django app that recommends the safest truck route based on weather,
-load weight and travel time. The brief is in `docs/brief.pdf`.
+load weight and travel time.The assessment brief is not included in this repository.
 
 **Status:** only the pure-Python risk engine (`backend/risk/`) is implemented.
 Routing, weather fetching, the API and the frontend are not built yet.
