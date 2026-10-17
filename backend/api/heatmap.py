@@ -20,9 +20,12 @@ HOURS = 49
 _GEOD = Geod(ellps="WGS84")
 
 
-def sample_corridor(geometry: list[list[float]]) -> list[tuple[float, float]]:
-    """Sample a lat/lon polyline every 10 miles, grid-dedupe, and cap at 150 points."""
-    coords = [(float(lat), float(lon)) for lat, lon in geometry]
+def sample_corridor(geometry: dict[str, list[list[float]]]) -> list[tuple[float, float]]:
+    """Sample GeoJSON coordinates (longitude, latitude) every 10 miles, then dedupe/cap."""
+    coords = [
+        (float(latitude), float(longitude))
+        for longitude, latitude in geometry["coordinates"]
+    ]
     segments: list[tuple[float, float, float, float, float]] = []
     cumulative = [0.0]
     for (lat1, lon1), (lat2, lon2) in pairwise(coords):
@@ -63,7 +66,10 @@ def sample_corridor(geometry: list[list[float]]) -> list[tuple[float, float]]:
 
 
 def build_heatmap(
-    geometry: list[list[float]], departure_utc: datetime, load_lb: float, service: WeatherService
+    geometry: dict[str, list[list[float]]],
+    departure_utc: datetime,
+    load_lb: float,
+    service: WeatherService,
 ) -> dict[str, object]:
     """Fetch one shared batch of point-hour weather and score each known sample."""
     points = sample_corridor(geometry)

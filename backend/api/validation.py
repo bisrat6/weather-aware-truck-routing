@@ -55,24 +55,30 @@ class AnalyzeRequestSerializer(serializers.Serializer):
         return attrs
 
 
-class HeatmapRequestSerializer(serializers.Serializer):
-    geometry = serializers.ListField(
+class HeatmapGeometrySerializer(serializers.Serializer):
+    coordinates = serializers.ListField(
         child=serializers.ListField(child=serializers.FloatField(), min_length=2, max_length=2),
         min_length=2,
+        max_length=40_000,
     )
-    departure_utc = serializers.CharField()
-    load_lb = serializers.FloatField(min_value=0, max_value=100_000)
 
-    def validate_geometry(self, value: list[list[float]]) -> list[list[float]]:
-        for pair in value:
-            lat, lon = pair
-            if not (math.isfinite(lat) and -90 <= lat <= 90):
-                raise serializers.ValidationError("Latitude must be finite and between -90 and 90.")
-            if not (math.isfinite(lon) and -180 <= lon <= 180):
+    def validate_coordinates(self, value: list[list[float]]) -> list[list[float]]:
+        for longitude, latitude in value:
+            if not (math.isfinite(longitude) and -180 <= longitude <= 180):
                 raise serializers.ValidationError(
                     "Longitude must be finite and between -180 and 180."
                 )
+            if not (math.isfinite(latitude) and -90 <= latitude <= 90):
+                raise serializers.ValidationError(
+                    "Latitude must be finite and between -90 and 90."
+                )
         return value
+
+
+class HeatmapRequestSerializer(serializers.Serializer):
+    geometry = HeatmapGeometrySerializer()
+    departure_utc = serializers.CharField()
+    load_lb = serializers.FloatField(min_value=0, max_value=100_000)
 
     def validate_load_lb(self, value: float) -> float:
         if not math.isfinite(value):

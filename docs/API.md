@@ -76,6 +76,8 @@ Response body:
 }
 ```
 
+Each route's `geometry` uses the GeoJSON object shape `{"coordinates": [[longitude, latitude], ...]}`.
+
 Geometry coordinates are GeoJSON `[longitude, latitude]`. `ranking` lists route indices in
 recommended-first order; `recommended` is the first route index. `risk_level` and `max_level`
 are `null` when no level can be assessed. Missing weather is never converted to Low. The
@@ -107,16 +109,19 @@ Request body:
 
 ```json
 {
-  "geometry": [[40.7128, -74.0060], [40.5, -73.8]],
+  "geometry": {"coordinates": [[-74.0060, 40.7128], [-73.8, 40.5]]},
   "departure_utc": "2026-10-18T12:00:00Z",
   "load_lb": 34000
 }
 ```
 
-`geometry` is an ordered list of at least two `[latitude, longitude]` WGS84 pairs copied
-from a route's GeoJSON geometry. `departure_utc` and `load_lb` use the same validation
-window and inclusive 0–100,000 lb range as `/api/analyze`. The service samples along the
-corridor and caps the output at 150 points. Hours are 49 consecutive UTC forecast hours;
+`geometry` must use the same GeoJSON object shape returned by `/api/analyze`, with an
+ordered `coordinates` list of `[longitude, latitude]` WGS84 pairs. At least two and at most
+40,000 points are accepted; this accommodates the recorded 34,997-point Los Angeles–New
+York route (about 808 KB for a compact JSON request) while bounding request size.
+`departure_utc` and `load_lb` use the same
+validation window and inclusive 0–100,000 lb range as `/api/analyze`. The service samples
+along the corridor and caps the output at 150 points. Hours are 49 consecutive UTC forecast hours;
 hour 0 is the nearest forecast hour to `departure_utc`, using the same nearest-hour rule
 as route checkpoint ETAs.
 

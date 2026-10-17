@@ -8,6 +8,7 @@ from django.test import override_settings
 from rest_framework.test import APIClient
 
 from api.heatmap import MAX_HEATMAP_POINTS, sample_corridor
+from api.validation import HeatmapRequestSerializer
 
 FIXTURES = Path(__file__).parents[1] / "fixtures"
 NOW = datetime(2026, 10, 17, 10, tzinfo=UTC)
@@ -26,7 +27,7 @@ class FakeResponse:
 
 def request_body(**updates):
     data = {
-        "geometry": [[40.7608, -111.8910], [40.2338, -111.6585]],
+        "geometry": {"coordinates": [[-111.8910, 40.7608], [-111.6585, 40.2338]]},
         "departure_utc": "2026-10-17T12:00:00Z",
         "load_lb": 10_000,
     }
@@ -103,16 +104,31 @@ def test_missing_weather_is_marked_null(client, monkeypatch):
 
 
 def test_corridor_sampling_obeys_point_cap():
-    points = sample_corridor([[-80, -170], [80, 170]])
+    points = sample_corridor({"coordinates": [[-170, -80], [170, 80]]})
     assert len(points) <= MAX_HEATMAP_POINTS
     assert len(points) == MAX_HEATMAP_POINTS
+
+
+def test_recorded_cross_country_geometry_fits_heatmap_input_limit():
+    fixture = json.loads((FIXTURES / "mapbox_la_nyc.json").read_text(encoding="utf-8"))
+    geometry = fixture["routes"][0]["geometry"]
+    serializer = HeatmapRequestSerializer(
+        data={
+            "geometry": geometry,
+            "departure_utc": "2026-10-17T12:00:00Z",
+            "load_lb": 34_000,
+        },
+        context={"now": NOW},
+    )
+    assert len(geometry["coordinates"]) == 34_997
+    assert serializer.is_valid(), serializer.errors
 
 
 @pytest.mark.parametrize(
     ("updates", "message"),
     [
         ({"geometry": None}, "geometry"),
-        ({"geometry": [[91, 0], [0, 0]]}, "latitude"),
+        ({"geometry": {"coordinates": [[0, 91], [0, 0]]}}, "latitude"),
         ({"departure_utc": "yesterday"}, "ISO 8601"),
         ({"departure_utc": "2026-10-16T23:00:00Z"}, "earliest hour"),
         ({"departure_utc": "2026-10-25T10:01:00Z"}, "7 days ahead"),
@@ -151,3 +167,57 @@ def test_heatmap_weather_errors_are_sanitized(
     assert "open-meteo.com" not in response.content.decode()
     if retry:
         assert "23 seconds" in response.json()["error"]["message"]
+
+
+def test_heatmap_rejects_swapped_latitude_longitude_geometry(client, monkeypatch):
+    monkeypatch.setattr("requests.get", lambda *args, **kwargs: pytest.fail("HTTP should not run"))
+    swapped = {"coordinates": [[40.7608, -111.8910], [40.2338, -111.6585]]}
+    response = client.post("/api/heatmap", request_body(geometry=swapped), format="json")
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "invalid_request"
+    assert "latitude" in response.json()["error"]["message"].lower()
+
+
+def test_analyze_geometry_round_trips_unchanged_into_heatmap(client, monkeypatch):
+    from django.test import override_settings
+
+    mapbox_payload = json.loads(
+        (FIXTURES / "mapbox_slc_provo.json").read_text(encoding="utf-8")
+    )
+
+    def get(url, params=None, timeout=None):
+        if "directions/v5" in url:
+            return FakeResponse(body=mapbox_payload)
+        if "open-meteo.com" in url:
+            return weather_response(params)
+        raise AssertionError(f"unexpected upstream URL: {url}")
+
+    monkeypatch.setattr("requests.get", get)
+    with override_settings(MAPBOX_TOKEN="round-trip-test-token"):
+        analyzed = client.post(
+            "/api/analyze",
+            {
+                "origin": {"lat": 40.7608, "lon": -111.8910},
+                "destination": {"lat": 40.2338, "lon": -111.6585},
+                "departure_utc": "2026-10-17T12:00:00Z",
+                "load_lb": 10_000,
+            },
+            format="json",
+        )
+        assert analyzed.status_code == 200
+        geometry = analyzed.json()["routes"][0]["geometry"]
+        heatmap = client.post(
+            "/api/heatmap",
+            {
+                "geometry": geometry,
+                "departure_utc": "2026-10-17T12:00:00Z",
+                "load_lb": 10_000,
+            },
+            format="json",
+        )
+    assert heatmap.status_code == 200
+    data = heatmap.json()
+    assert len(data["hours"]) == 49
+    assert all(len(point["risk"]) == 49 for point in data["points"])
+    assert data["points"]
+    assert all(abs(point["lat"] - 40.7608) < 1 for point in data["points"])
