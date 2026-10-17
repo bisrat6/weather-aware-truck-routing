@@ -41,6 +41,7 @@ if DEBUG and not ALLOWED_HOSTS:
 
 INSTALLED_APPS = [
     "django.contrib.contenttypes",
+    "django.contrib.auth",  # DRF imports auth models even though no user model is used
     "django.contrib.staticfiles",
     "rest_framework",
 ]

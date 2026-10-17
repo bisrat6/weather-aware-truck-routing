@@ -12,4 +12,5 @@ select = ["E", "F", "W", "I", "B", "UP", "ANN", "SIM", "RUF"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+DJANGO_SETTINGS_MODULE = "config.settings_test"
 addopts = "-ra"
