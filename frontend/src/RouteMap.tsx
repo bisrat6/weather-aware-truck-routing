@@ -5,7 +5,7 @@ import Map, {
   type MapLayerMouseEvent,
   type MapRef,
 } from "react-map-gl/maplibre";
-import { GeoJSONSource } from "maplibre-gl";
+import { GeoJSONSource, type Map as MapLibreMap } from "maplibre-gl";
 import { Compass } from "lucide-react";
 import type { ExpressionSpecification } from "@maplibre/maplibre-gl-style-spec";
 import type { Feature, FeatureCollection, LineString, Point } from "geojson";
@@ -29,16 +29,18 @@ const ORIGIN_LAYER = "active-route-origin";
 const DESTINATION_LAYER = "active-route-destination";
 const HEATMAP_SOURCE = "forecast-risk-points";
 const HEATMAP_LAYER = "forecast-risk-density";
-const HEATMAP_RIBBON_LAYER = "forecast-risk-ribbon";
 const HEATMAP_CIRCLE_LAYER = "forecast-risk-circles";
 const HEATMAP_LOW_CIRCLE_LAYER = "forecast-risk-low-circles";
 const HEATMAP_MISSING_LAYER = "forecast-risk-missing";
+const HEATMAP_LABELS: RiskLabel[] = ["Low", "Moderate", "High", "Severe", "No Travel"];
 
 interface HeatmapProperties {
   risk_values: (number | null)[];
   risk_level: number | null;
   heat_weight: number;
   weather_missing: boolean;
+  marker_image: string;
+  near_checkpoint: boolean;
 }
 
 type HeatmapFeature = Feature<Point, HeatmapProperties>;
@@ -59,6 +61,8 @@ function heatmapCollection(response: HeatmapResponse): HeatmapCollection {
           risk_level: risk,
           heat_weight: risk ?? 0,
           weather_missing: risk === null,
+          marker_image: riskIconName(risk === null ? "No data" : HEATMAP_LABELS[risk]),
+          near_checkpoint: false,
         },
         geometry: { type: "Point", coordinates: [point.lon, point.lat] },
       };
@@ -167,6 +171,26 @@ function endpointCollection(route: AnalyzedRoute | null): FeatureCollection<Poin
       { type: "Feature", properties: { kind: "destination" }, geometry: { type: "Point", coordinates: destination } },
     ],
   };
+}
+
+function updateHeatmapFeatureState(
+  map: MapLibreMap,
+  data: HeatmapCollection,
+  hour: number,
+  route: AnalyzedRoute | null,
+): void {
+  const checkpointPixels = (route?.checkpoints ?? []).map((checkpoint) => map.project([checkpoint.lon, checkpoint.lat]));
+  for (const feature of data.features) {
+    const level = feature.properties.risk_values[hour] ?? null;
+    const pixel = map.project(feature.geometry.coordinates as [number, number]);
+    feature.properties.risk_level = level;
+    feature.properties.heat_weight = level ?? 0;
+    feature.properties.weather_missing = level === null;
+    feature.properties.marker_image = riskIconName(level === null ? "No data" : HEATMAP_LABELS[level]);
+    feature.properties.near_checkpoint = checkpointPixels.some(
+      (checkpointPixel) => Math.hypot(pixel.x - checkpointPixel.x, pixel.y - checkpointPixel.y) <= 5,
+    );
+  }
 }
 
 function localEta(value: string): string {
@@ -348,7 +372,7 @@ export function RouteMap({
         filter: ["any", ["!=", ["get", "risk_label"], "Low"], ["==", ["get", "demo_marker"], true]],
         layout: {
           "icon-image": ["get", "marker_image"],
-          "icon-size": ["match", ["get", "risk_label"], "Low", 0.42, 0.65],
+          "icon-size": ["match", ["get", "risk_label"], "Low", 0.42, ["interpolate", ["linear"], ["zoom"], 3, 0.35, 6, 0.67]],
           "icon-allow-overlap": true,
           "icon-ignore-placement": true,
         },
@@ -454,56 +478,32 @@ export function RouteMap({
             ["interpolate", ["linear"], ["get", "heat_weight"],
               0, 0, 1, 0.3, 2, 0.6, 3, 0.85, 4, 1],
           ],
-          "heatmap-intensity": ["interpolate", ["linear"], ["zoom"], 0, 1, 8, 1],
-          "heatmap-radius": ["interpolate", ["linear"], ["zoom"], 0, 12, 4, 24, 8, 38],
+          "heatmap-intensity": ["interpolate", ["linear"], ["zoom"], 3, 1, 6, 1, 9, 1],
+          "heatmap-radius": ["interpolate", ["linear"], ["zoom"], 3, 22, 6, 15, 9, 8],
           "heatmap-opacity": ["interpolate", ["linear"], ["zoom"], 0, 0.85, 8, 0.9],
           "heatmap-color": [
             "interpolate", ["linear"], ["heatmap-density"],
             0, "rgba(0,0,0,0)",
-            0.08, getRiskColor("Moderate"),
-            0.3, getRiskColor("Moderate"),
+            0.3, "#e3b323",
             0.6, getRiskColor("High"),
-            0.82, getRiskColor("Severe"),
-            0.96, getRiskColor("No Travel"),
+            0.85, getRiskColor("Severe"),
+            1, getRiskColor("No Travel"),
           ],
         } as unknown as Record<string, unknown>,
-      }, firstRouteLayer);
-    }
-    if (!map.getLayer(HEATMAP_RIBBON_LAYER)) {
-      map.addLayer({
-        id: HEATMAP_RIBBON_LAYER,
-        type: "circle",
-        source: HEATMAP_SOURCE,
-        filter: ["==", ["get", "weather_missing"], false],
-        paint: {
-          "circle-radius": ["interpolate", ["linear"], ["zoom"], 0, 12, 4, 26, 8, 42, 12, 58],
-          "circle-color": getRiskColor("Low"),
-          "circle-opacity": 0.25,
-          "circle-blur": 1,
-        },
       }, firstRouteLayer);
     }
     if (!map.getLayer(HEATMAP_CIRCLE_LAYER)) {
       map.addLayer({
         id: HEATMAP_CIRCLE_LAYER,
-        type: "circle",
+        type: "symbol",
         source: HEATMAP_SOURCE,
-        minzoom: 4,
-        filter: ["all", ["==", ["get", "weather_missing"], false], [">", ["get", "risk_level"], 0]],
-        paint: {
-          "circle-radius": ["match", ["get", "risk_level"], 0, 2, 1, 4, 2, 5, 3, 6, 4, 6, 4],
-          "circle-opacity": ["match", ["get", "risk_level"], 0, 0.42, 1],
-          "circle-color": [
-            "match", ["get", "risk_level"],
-            0, getRiskColor("Low"),
-            1, getRiskColor("Moderate"),
-            2, getRiskColor("High"),
-            3, getRiskColor("Severe"),
-            4, getRiskColor("No Travel"),
-            getRiskColor("No data"),
-          ],
-          "circle-stroke-color": getThemeToken("--surface"),
-          "circle-stroke-width": 1.5,
+        minzoom: 3,
+        filter: ["all", ["==", ["get", "weather_missing"], false], [">", ["get", "risk_level"], 0], ["==", ["get", "near_checkpoint"], false]],
+        layout: {
+          "icon-image": ["get", "marker_image"],
+          "icon-size": 0.67,
+          "icon-allow-overlap": true,
+          "icon-ignore-placement": true,
         },
       }, firstRouteLayer);
     }
@@ -513,32 +513,30 @@ export function RouteMap({
         type: "circle",
         source: HEATMAP_SOURCE,
         minzoom: 7,
-        filter: ["all", ["==", ["get", "weather_missing"], false], ["==", ["get", "risk_level"], 0]],
+        filter: ["all", ["==", ["get", "weather_missing"], false], ["==", ["get", "risk_level"], 0], ["==", ["get", "near_checkpoint"], false]],
         paint: {
           "circle-radius": 2.5,
-          "circle-color": getRiskColor("Low"),
-          "circle-opacity": 0.5,
-          "circle-stroke-color": getThemeToken("--surface"),
-          "circle-stroke-width": 1,
+          "circle-color": getRiskColor("No data"),
+          "circle-opacity": 0.85,
         },
       }, firstRouteLayer);
     }
     if (!map.getLayer(HEATMAP_MISSING_LAYER)) {
       map.addLayer({
         id: HEATMAP_MISSING_LAYER,
-        type: "circle",
+        type: "symbol",
         source: HEATMAP_SOURCE,
-        filter: ["==", ["get", "weather_missing"], true],
-        paint: {
-          "circle-radius": ["interpolate", ["linear"], ["zoom"], 0, 1.5, 8, 3, 14, 5],
-          "circle-color": "rgba(255,255,255,0)",
-          "circle-stroke-color": getRiskColor("No data"),
-          "circle-stroke-opacity": 0.65,
-          "circle-stroke-width": 1.5,
+        minzoom: 3,
+        filter: ["all", ["==", ["get", "weather_missing"], true], ["==", ["get", "near_checkpoint"], false]],
+        layout: {
+          "icon-image": ["get", "marker_image"],
+          "icon-size": 0.67,
+          "icon-allow-overlap": true,
+          "icon-ignore-placement": true,
         },
       }, firstRouteLayer);
     }
-    for (const layerId of [HEATMAP_LAYER, HEATMAP_RIBBON_LAYER, HEATMAP_CIRCLE_LAYER, HEATMAP_LOW_CIRCLE_LAYER, HEATMAP_MISSING_LAYER]) {
+    for (const layerId of [HEATMAP_LAYER, HEATMAP_CIRCLE_LAYER, HEATMAP_LOW_CIRCLE_LAYER, HEATMAP_MISSING_LAYER]) {
       map.setLayoutProperty(layerId, "visibility", heatmapEnabled ? "visible" : "none");
     }
   }, [loaded, heatmapData, heatmapEnabled, styleRevision]);
@@ -550,12 +548,7 @@ export function RouteMap({
     frame = window.requestAnimationFrame(() => {
       const source = map.getSource(HEATMAP_SOURCE);
       if (!(source instanceof GeoJSONSource)) return;
-      for (const feature of heatmapData.features) {
-        const level = feature.properties.risk_values[heatmapHour] ?? null;
-        feature.properties.risk_level = level;
-        feature.properties.heat_weight = level ?? 0;
-        feature.properties.weather_missing = level === null;
-      }
+      updateHeatmapFeatureState(map, heatmapData, heatmapHour, selectedRoute);
       if (perfEnabled) {
         const id = ++heatmapMeasureId.current;
         const startMark = `heatmap-setdata-start-${id}`;
@@ -576,7 +569,32 @@ export function RouteMap({
       }
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [loaded, heatmapData, heatmapHour, perfEnabled, styleRevision]);
+  }, [loaded, heatmapData, heatmapHour, perfEnabled, selectedRoute, styleRevision]);
+
+  useEffect(() => {
+    const map = mapRef.current?.getMap();
+    if (!loaded || !map || !heatmapData) return;
+    let frame = 0;
+    const refreshProximity = () => {
+      window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(() => {
+        const source = map.getSource(HEATMAP_SOURCE);
+        if (!(source instanceof GeoJSONSource)) return;
+        updateHeatmapFeatureState(map, heatmapData, heatmapHour, selectedRoute);
+        source.setData(heatmapData);
+      });
+    };
+    map.on("zoomend", refreshProximity);
+    map.on("rotateend", refreshProximity);
+    map.on("pitchend", refreshProximity);
+    refreshProximity();
+    return () => {
+      window.cancelAnimationFrame(frame);
+      map.off("zoomend", refreshProximity);
+      map.off("rotateend", refreshProximity);
+      map.off("pitchend", refreshProximity);
+    };
+  }, [loaded, heatmapData, heatmapHour, selectedRoute, styleRevision]);
 
   useEffect(() => {
     const map = mapRef.current?.getMap();

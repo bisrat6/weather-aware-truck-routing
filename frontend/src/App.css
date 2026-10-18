@@ -127,9 +127,10 @@ button:focus-visible, input:focus-visible, summary:focus-visible, [role="radio"]
 .heatmap-unavailable { padding: var(--space-2) var(--space-3); color: var(--warning-text); background: var(--warning-bg); border-radius: var(--radius-small); }
 .heatmap-demo-badge { padding: var(--space-1) var(--space-2); color: var(--warning-text); font-size: 10px; font-weight: var(--weight-bold); background: var(--warning-bg); border-radius: var(--radius-pill); }
 .heatmap-hour-status { margin: 0; color: var(--muted); font-size: 10px; line-height: var(--line-normal); }
-.heatmap-range-ticks { position: relative; height: 6px; margin: calc(-1 * var(--space-2)) var(--space-2) 0; }
-.heatmap-range-ticks i { position: absolute; top: 0; width: 1px; height: 6px; background: var(--quiet); }
-.heatmap-range-ticks i:last-child { height: 8px; }
+.heatmap-explanation { margin: 0; color: var(--muted); font-size: 10px; line-height: var(--line-normal); }
+.heatmap-range-ticks { position: relative; height: 20px; margin: calc(-1 * var(--space-2)) var(--space-2) 0; }
+.heatmap-range-ticks span { position: absolute; top: 8px; transform: translateX(-50%); color: var(--muted); font-size: 10px; white-space: nowrap; }
+.heatmap-range-ticks span::before { position: absolute; top: -8px; left: 50%; width: 1px; height: 6px; background: var(--quiet); content: ""; }
 .heatmap-range-ends { display: flex; justify-content: space-between; color: var(--muted); font-size: 10px; }
 .heatmap-credit a { color: var(--link); }
 .heatmap-perf { position: absolute; z-index: 2; right: var(--space-4); bottom: 118px; display: grid; gap: var(--space-1); max-width: 280px; padding: var(--space-3); color: var(--text); font-size: var(--font-12); background: var(--attribution-bg); border: 1px solid var(--divider); border-radius: var(--radius-card); box-shadow: var(--card-shadow); }
@@ -152,6 +153,7 @@ button:focus-visible, input:focus-visible, summary:focus-visible, [role="radio"]
 .risk-legend__title { width: 100%; color: var(--muted); font-size: 10px; font-weight: var(--weight-semibold); text-transform: uppercase; letter-spacing: 0.06em; }
 .risk-legend__item { display: inline-flex; align-items: center; gap: var(--space-1); color: var(--risk-color); font-size: var(--font-12); font-weight: var(--weight-medium); white-space: nowrap; }
 .risk-legend__icon { width: 18px; height: 18px; }
+.risk-legend__notice { flex-basis: 100%; color: var(--muted); font-size: 10px; }
 .panel-handle { display: none; }
 .maplibregl-ctrl-group { overflow: hidden; border: 1px solid var(--divider) !important; border-radius: var(--radius-control) !important; box-shadow: var(--card-shadow) !important; }
 .maplibregl-ctrl-group button { width: var(--touch-target) !important; height: var(--touch-target) !important; }

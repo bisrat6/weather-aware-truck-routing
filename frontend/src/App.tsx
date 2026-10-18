@@ -106,8 +106,9 @@ function HeatmapPanel({
     else counts[HEATMAP_RISK_LEVELS[value]] += 1;
   }
   const worst = [...HEATMAP_RISK_LEVELS].reverse().find((level) => counts[level] > 0);
-  const allLow = Boolean(response?.points.length) && counts.Low === response!.points.length;
-  const hourStatus = allLow
+  const noWeatherHazards = Boolean(response?.points.length)
+    && counts.Moderate + counts.High + counts.Severe + counts["No Travel"] === 0;
+  const hourStatus = noWeatherHazards
     ? "No weather hazards along this route at this hour"
     : `At this hour: ${response?.points.length ?? 0} points, worst level ${worst ?? "No data"} · Low ${counts.Low} · Moderate ${counts.Moderate} · High ${counts.High} · Severe ${counts.Severe} · No Travel ${counts["No Travel"]} · missing ${counts.Missing}`;
 
@@ -138,9 +139,12 @@ function HeatmapPanel({
         onChange={(event) => onHourChange(Number(event.target.value))}
       />
       <div className="heatmap-range-ticks" aria-hidden="true">
-        {[25, 50, 75, 100].map((position) => <i key={position} style={{ left: `${position}%` }} />)}
+        {[12, 24, 36].map((tickHour) => (
+          <span key={tickHour} style={{ left: `${tickHour / 48 * 100}%` }}>+{tickHour} h</span>
+        ))}
       </div>
       <div className="heatmap-range-ends" aria-hidden="true"><span>Departure</span><span>+48 h</span></div>
+      <p className="heatmap-explanation">Map shows weather at this hour for the whole route. Route risk uses the weather when the truck reaches each checkpoint.</p>
       {loading && <p className="heatmap-status" role="status">Loading forecast…</p>}
       {unavailable && <p className="heatmap-unavailable" role="status">Forecast overlay unavailable for this route</p>}
       {response && <p className="heatmap-hour-status" aria-live="polite">{hourStatus}</p>}
@@ -168,10 +172,6 @@ function formatMiles(miles: number): string {
 
 function formatCheckpointCount(count: number): string {
   return `${count.toLocaleString()} checkpoint${count === 1 ? "" : "s"}`;
-}
-
-function signedDelta(value: number): string {
-  return `${value > 0 ? "+" : ""}${value.toLocaleString()}`;
 }
 
 function getRiskLabel(level: RiskLevel | null): RiskLabel {
@@ -334,7 +334,10 @@ function RouteCard({
     const durationComparison = minutesDelta === 0
       ? "same duration"
       : `${Math.abs(minutesDelta).toLocaleString()} min ${minutesDelta > 0 ? "longer" : "shorter"}`;
-    const comparison = `${durationComparison}, ${signedDelta(milesDelta)} mi vs Route ${recommendedRoute.route_index + 1}`;
+    const distanceComparison = milesDelta === 0
+      ? "same distance"
+      : `${Math.abs(milesDelta).toLocaleString()} mi ${milesDelta > 0 ? "longer" : "shorter"}`;
+    const comparison = `${durationComparison}, ${distanceComparison} than Route ${recommendedRoute.route_index + 1}`;
     const severeDelta = Math.round(route.summary.miles_by_level.Severe) - Math.round(recommendedRoute.summary.miles_by_level.Severe);
     const highDelta = Math.round(route.summary.miles_by_level.High) - Math.round(recommendedRoute.summary.miles_by_level.High);
     const higherRiskMiles = [
@@ -549,6 +552,11 @@ export default function App() {
   const recommendedPosition = routes.findIndex((route) => route.route_index === data?.recommended);
   const nextRankedRoute = recommendedPosition >= 0 ? routes[recommendedPosition + 1] : undefined;
   const levelsDemoEnabled = import.meta.env.DEV && new URLSearchParams(window.location.search).get("demo") === "levels";
+  const heatmapHasNoHazards = Boolean(displayedHeatmapResponse?.points.length)
+    && displayedHeatmapResponse!.points.every((point) => {
+      const level = point.risk[heatmapHour];
+      return level === null || level === 0;
+    });
 
   function handleTabKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
     if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
@@ -577,6 +585,7 @@ export default function App() {
           {levelsDemoEnabled && (
             <span className="heatmap-demo-badge">DEMO DATA</span>
           )}
+          {heatmapHasNoHazards && <span className="risk-legend__notice">No weather hazards along this route at this hour</span>}
           {RISK_LEVELS.filter(({ label }) => label !== "No data" || heatmapEnabled || levelsDemoEnabled).map(({ label }) => (
             <span className="risk-legend__item" key={label} style={riskStyle(label)}>
               <RiskIcon level={label} className="risk-icon risk-legend__icon" />{label}
