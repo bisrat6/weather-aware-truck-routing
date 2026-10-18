@@ -6,6 +6,7 @@ import Map, {
   type MapRef,
 } from "react-map-gl/maplibre";
 import { GeoJSONSource } from "maplibre-gl";
+import { Compass } from "lucide-react";
 import type { ExpressionSpecification } from "@maplibre/maplibre-gl-style-spec";
 import type { Feature, FeatureCollection, LineString, Point } from "geojson";
 import {
@@ -408,8 +409,10 @@ export function RouteMap({
         maxzoom: 9,
         paint: {
           "heatmap-weight": [
-            "interpolate", ["linear"], ["get", "heat_weight"],
-            0, 0, 1, 0.25, 2, 0.5, 3, 0.75, 4, 1,
+            "case",
+            ["boolean", ["get", "weather_missing"], false], 0,
+            ["interpolate", ["linear"], ["get", "heat_weight"],
+              0, 0.2, 1, 0.4, 2, 0.6, 3, 0.8, 4, 1],
           ],
           "heatmap-intensity": ["interpolate", ["linear"], ["zoom"], 0, 2.4, 8, 1.8],
           "heatmap-radius": ["interpolate", ["linear"], ["zoom"], 0, 8, 4, 28, 8, 48],
@@ -417,6 +420,7 @@ export function RouteMap({
           "heatmap-color": [
             "interpolate", ["linear"], ["heatmap-density"],
             0, "rgba(0,0,0,0)",
+            0.0001, "rgba(30,101,58,0.22)",
             0.035, getRiskColor("Low"),
             0.09, getRiskColor("Moderate"),
             0.17, getRiskColor("High"),
@@ -434,7 +438,8 @@ export function RouteMap({
         minzoom: 9,
         filter: ["==", ["get", "weather_missing"], false],
         paint: {
-          "circle-radius": ["interpolate", ["linear"], ["zoom"], 9, 3, 14, 6],
+          "circle-radius": ["match", ["get", "risk_level"], 0, 2, 1, 4, 2, 5, 3, 6, 4, 6, 4],
+          "circle-opacity": ["match", ["get", "risk_level"], 0, 0.42, 1],
           "circle-color": [
             "match", ["get", "risk_level"],
             0, getRiskColor("Low"),
@@ -582,11 +587,20 @@ export function RouteMap({
         onLoad={() => setLoaded(true)}
         style={{ width: "100%", height: "100%" }}
       >
-        <NavigationControl position="bottom-right" showCompass />
+        <NavigationControl position="bottom-right" showCompass={false} />
         {popupCheckpoint && (
           <CheckpointPopup checkpoint={popupCheckpoint} onClose={() => setPopupCheckpoint(null)} />
         )}
       </Map>
+      <button
+        className="map-compass-reset"
+        type="button"
+        aria-label="Reset map orientation to north"
+        title="Reset north"
+        onClick={() => mapRef.current?.getMap().easeTo({ bearing: 0, pitch: 0, duration: 300 })}
+      >
+        <Compass size={18} aria-hidden="true" />
+      </button>
       {perfEnabled && (
         <aside className="heatmap-perf" aria-label="Heatmap performance measurements">
           <strong>Heatmap performance</strong>

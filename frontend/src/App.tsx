@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent } from "react";
 import {
   CalendarClock,
   ChevronDown,
@@ -23,6 +23,33 @@ type HeatmapContext = { departureUtc: string; loadLb: number };
 type CachedHeatmap = { response: HeatmapResponse; requestBytes: number; responseBytes: number };
 
 const OPEN_METEO_URL = "https://open-meteo.com/";
+const HEATMAP_RISK_LEVELS: RiskLevel[] = ["Low", "Moderate", "High", "Severe", "No Travel"];
+
+function stormDemoEnabled(): boolean {
+  return import.meta.env.DEV && new URLSearchParams(window.location.search).get("demo") === "storm";
+}
+
+function makeStormDemo(response: HeatmapResponse): HeatmapResponse {
+  const missingIndexes = new Set([0.11, 0.52, 0.88].map((part) => Math.round((response.points.length - 1) * part)));
+  return {
+    ...response,
+    points: response.points.map((point, pointIndex) => ({
+      ...point,
+      risk: response.hours.map((_, hour) => {
+        if (missingIndexes.has(pointIndex)) return null;
+        const progress = hour / Math.max(1, response.hours.length - 1);
+        const stormStrength = Math.sin(progress * Math.PI);
+        const routePosition = response.points.length < 2 ? 0.5 : pointIndex / (response.points.length - 1);
+        const distanceFromCenter = Math.abs(routePosition - 0.5);
+        const stormWidth = 0.015 + stormStrength * 0.16;
+        if (stormStrength > 0.12 && distanceFromCenter <= stormWidth * 0.2) return 3;
+        if (stormStrength > 0.08 && distanceFromCenter <= stormWidth * 0.55) return 2;
+        if (stormStrength > 0.05 && distanceFromCenter <= stormWidth) return 1;
+        return 0;
+      }),
+    })),
+  };
+}
 
 function localTimezoneLabel(value: string): string {
   const date = new Date(value);
@@ -34,13 +61,14 @@ function localTimezoneLabel(value: string): string {
   return `${timezone} (UTC${sign}${hours}:${minutes})`;
 }
 
-function localHeatmapTime(value: string): string {
+function localHeatmapTime(value: string, departureValue: string): string {
+  const hourOffset = Math.round((Date.parse(value) - Date.parse(departureValue)) / 3_600_000);
   return new Date(value).toLocaleString(undefined, {
     weekday: "short",
     hour: "2-digit",
     minute: "2-digit",
     hour12: false,
-  });
+  }) + ` (+${hourOffset} h)`;
 }
 
 function HeatmapPanel({
@@ -52,6 +80,7 @@ function HeatmapPanel({
   onHourChange,
   enabled,
   onEnabledChange,
+  demo,
 }: {
   response: HeatmapResponse | null;
   routeIndex: number | null;
@@ -61,10 +90,24 @@ function HeatmapPanel({
   onHourChange: (hour: number) => void;
   enabled: boolean;
   onEnabledChange: (enabled: boolean) => void;
+  demo: boolean;
 }) {
   const hourValue = response?.hours[hour] ?? response?.hours[0] ?? "";
-  const timeLabel = hourValue ? localHeatmapTime(hourValue) : "Choose a route to load forecast hours";
+  const timeLabel = hourValue
+    ? localHeatmapTime(hourValue, response?.hours[0] ?? hourValue)
+    : "Choose a route to load forecast hours";
   const timezone = hourValue ? localTimezoneLabel(hourValue) : Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const counts = { Low: 0, Moderate: 0, High: 0, Severe: 0, "No Travel": 0, Missing: 0 };
+  for (const point of response?.points ?? []) {
+    const value = point.risk[hour] ?? null;
+    if (value === null) counts.Missing += 1;
+    else counts[HEATMAP_RISK_LEVELS[value]] += 1;
+  }
+  const worst = [...HEATMAP_RISK_LEVELS].reverse().find((level) => counts[level] > 0);
+  const allLow = Boolean(response?.points.length) && counts.Low === response!.points.length;
+  const hourStatus = allLow
+    ? "No weather hazards along this route at this hour"
+    : `At this hour: ${response?.points.length ?? 0} points, worst level ${worst ?? "No data"} · Low ${counts.Low} · Moderate ${counts.Moderate} · High ${counts.High} · Severe ${counts.Severe} · No Travel ${counts["No Travel"]} · missing ${counts.Missing}`;
 
   return (
     <section className="panel-section heatmap-section" aria-labelledby="heatmap-title">
@@ -72,6 +115,7 @@ function HeatmapPanel({
         <h2 id="heatmap-title" className="section-title">
           {routeIndex === null ? "Weather forecast" : `Forecast along Route ${routeIndex + 1}`}
         </h2>
+        {import.meta.env.DEV && demo && <span className="heatmap-demo-badge">DEMO DATA</span>}
         <label className="heatmap-toggle">
           <input type="checkbox" checked={enabled} onChange={(event) => onEnabledChange(event.target.checked)} />
           <span>Show</span>
@@ -91,18 +135,13 @@ function HeatmapPanel({
         aria-valuetext={hourValue ? `${timeLabel}, ${timezone}` : timeLabel}
         onChange={(event) => onHourChange(Number(event.target.value))}
       />
+      <div className="heatmap-range-ticks" aria-hidden="true">
+        {[25, 50, 75, 100].map((position) => <i key={position} style={{ left: `${position}%` }} />)}
+      </div>
+      <div className="heatmap-range-ends" aria-hidden="true"><span>Departure</span><span>+48 h</span></div>
       {loading && <p className="heatmap-status" role="status">Loading forecast…</p>}
       {unavailable && <p className="heatmap-unavailable" role="status">Forecast overlay unavailable for this route</p>}
-      <div className="heatmap-legend" aria-label="Heatmap risk legend">
-        {RISK_LEVELS.filter(({ label }) => label !== "No data").map(({ label, marker }) => (
-          <span className="heatmap-legend__item" key={label} style={riskStyle(label)}>
-            <i aria-hidden="true">{marker}</i>{label}
-          </span>
-        ))}
-        <span className="heatmap-legend__item" style={riskStyle("No data")}>
-          <i aria-hidden="true">?</i>No forecast data
-        </span>
-      </div>
+      {response && <p className="heatmap-hour-status" aria-live="polite">{hourStatus}</p>}
       <p className="heatmap-credit">Weather data by <a href={OPEN_METEO_URL} target="_blank" rel="noreferrer">Open-Meteo</a></p>
     </section>
   );
@@ -209,6 +248,12 @@ function LoadBar({ value, onChange }: { value: string; onChange: (value: string)
       ? "Stricter wind rules above 30,000 lb"
       : "Load is included in wind risk scoring";
 
+  function clampLoadOnBlur() {
+    const parsed = Number(value);
+    const bounded = Number.isFinite(parsed) ? Math.min(100_000, Math.max(0, Math.trunc(parsed))) : 0;
+    onChange(String(bounded));
+  }
+
   return (
     <section className="panel-section load-section" aria-labelledby="load-title">
       <div className="section-title-row">
@@ -228,7 +273,8 @@ function LoadBar({ value, onChange }: { value: string; onChange: (value: string)
         max="100000"
         step="1"
         value={value}
-        onChange={(event) => onChange(event.target.value)}
+        onChange={(event) => onChange(event.target.value.replace(/^0+(?=\d)/, ""))}
+        onBlur={clampLoadOnBlur}
       />
       <div className="load-meter" aria-hidden="true">
         <div className="load-meter__track"><span style={{ width: `${visualPercent}%` }} /></div>
@@ -236,7 +282,9 @@ function LoadBar({ value, onChange }: { value: string; onChange: (value: string)
         <i className="load-meter__tick load-meter__tick--40" />
         <span className="load-meter__limit">80k</span>
       </div>
-      <div className="load-meter__labels" aria-hidden="true"><span>0</span><span>30k</span><span>40k</span><span>80k lb</span></div>
+      <div className="load-meter__labels" aria-hidden="true">
+        <span>0</span><span>30k</span><span>40k</span><span>80k lb</span>
+      </div>
       <div className={`load-advisory${numericValue > 30_000 ? " load-advisory--active" : ""}`}>
         <strong>{numericValue.toLocaleString()} lb</strong>
         <span>{note}</span>
@@ -355,6 +403,11 @@ export default function App() {
   const [heatmapRequestedAt, setHeatmapRequestedAt] = useState<number | null>(null);
   const [heatmapRequestBytes, setHeatmapRequestBytes] = useState<number | null>(null);
   const [heatmapResponseBytes, setHeatmapResponseBytes] = useState<number | null>(null);
+  const demoHeatmap = stormDemoEnabled();
+  const displayedHeatmapResponse = useMemo(
+    () => heatmapResponse && demoHeatmap ? makeStormDemo(heatmapResponse) : heatmapResponse,
+    [heatmapResponse, demoHeatmap],
+  );
 
   useEffect(() => {
     if (!loading) return;
@@ -474,7 +527,7 @@ export default function App() {
           routes={data?.routes ?? []}
           recommended={data?.recommended ?? null}
           selectedRoute={activeRoute}
-          heatmapResponse={heatmapResponse}
+          heatmapResponse={displayedHeatmapResponse}
           heatmapHour={heatmapHour}
           heatmapEnabled={heatmapEnabled}
           heatmapRequestedAt={heatmapRequestedAt}
@@ -483,7 +536,7 @@ export default function App() {
         />
         <div className="risk-legend" aria-label="Risk level legend">
           <span className="risk-legend__title">Checkpoint risk</span>
-          {RISK_LEVELS.map(({ label, marker }) => (
+          {RISK_LEVELS.filter(({ label }) => label !== "No data" || heatmapEnabled).map(({ label, marker }) => (
             <span className="risk-legend__item" key={label} style={riskStyle(label)}>
               <i aria-hidden="true">{marker}</i>{label}
             </span>
@@ -581,7 +634,7 @@ export default function App() {
             )}
           </section>
           <HeatmapPanel
-            response={heatmapResponse}
+            response={displayedHeatmapResponse}
             routeIndex={activeRoute?.route_index ?? null}
             loading={heatmapLoading}
             unavailable={heatmapUnavailable}
@@ -589,6 +642,7 @@ export default function App() {
             onHourChange={setHeatmapHour}
             enabled={heatmapEnabled}
             onEnabledChange={setHeatmapEnabled}
+            demo={demoHeatmap}
           />
         </div>
       </aside>
