@@ -1,7 +1,8 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { analyze, geocode } from "./api";
+import { analyze } from "./api";
+import { PlacePicker, type Place } from "./PlacePicker";
 import { RouteMap } from "./RouteMap";
-import type { AnalyzeResponse, Coordinate } from "./types";
+import type { AnalyzeResponse } from "./types";
 
 function defaultDeparture(): string {
   const date = new Date(Date.now() + 2 * 60 * 60 * 1000);
@@ -17,8 +18,8 @@ function formatDuration(seconds: number): string {
 }
 
 export default function App() {
-  const [originText, setOriginText] = useState("");
-  const [destinationText, setDestinationText] = useState("");
+  const [origin, setOrigin] = useState<Place | null>(null);
+  const [destination, setDestination] = useState<Place | null>(null);
   const [departure, setDeparture] = useState(defaultDeparture);
   const [loadLb, setLoadLb] = useState("0");
   const [data, setData] = useState<AnalyzeResponse | null>(null);
@@ -32,13 +33,6 @@ export default function App() {
     return () => window.clearTimeout(timer);
   }, [loading]);
 
-  async function resolvePlace(query: string): Promise<Coordinate> {
-    const result = await geocode(query);
-    const first = result.results[0];
-    if (!first) throw new Error(`No location found for “${query}”.`);
-    return { lat: first.lat, lon: first.lon };
-  }
-
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setLoading(true);
@@ -46,13 +40,10 @@ export default function App() {
     setError(null);
     setData(null);
     try {
-      const [origin, destination] = await Promise.all([
-        resolvePlace(originText.trim()),
-        resolvePlace(destinationText.trim()),
-      ]);
+      if (!origin || !destination) return;
       const result = await analyze({
-        origin,
-        destination,
+        origin: { lat: origin.lat, lon: origin.lon },
+        destination: { lat: destination.lat, lon: destination.lon },
         departure_utc: new Date(departure).toISOString(),
         load_lb: Number(loadLb),
         interval_miles: 25,
@@ -71,19 +62,15 @@ export default function App() {
       <h1>Weather-aware truck routing</h1>
       <form onSubmit={submit}>
         <p>
-          <label>
-            Origin <input required value={originText} onChange={(event) => setOriginText(event.target.value)} />
-          </label>
+          <PlacePicker id="origin" label="Origin" value={origin} onChange={setOrigin} />
         </p>
         <p>
-          <label>
-            Destination{" "}
-            <input
-              required
-              value={destinationText}
-              onChange={(event) => setDestinationText(event.target.value)}
-            />
-          </label>
+          <PlacePicker
+            id="destination"
+            label="Destination"
+            value={destination}
+            onChange={setDestination}
+          />
         </p>
         <p>
           <label>
@@ -110,7 +97,7 @@ export default function App() {
             />
           </label>
         </p>
-        <button type="submit" disabled={loading}>
+        <button type="submit" disabled={loading || !origin || !destination}>
           {loading ? "Analyzing…" : "Analyze routes"}
         </button>
       </form>

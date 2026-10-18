@@ -10,8 +10,15 @@ interface ApiErrorBody {
   error?: { code?: unknown; message?: unknown };
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+async function request<T>(
+  path: string,
+  init?: RequestInit,
+  externalSignal?: AbortSignal,
+): Promise<T> {
   const controller = new AbortController();
+  const abortRequest = () => controller.abort();
+  if (externalSignal?.aborted) controller.abort();
+  else externalSignal?.addEventListener("abort", abortRequest, { once: true });
   const timeout = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
     const response = await fetch(`${API_BASE_URL}${path}`, {
@@ -43,6 +50,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     throw error;
   } finally {
     window.clearTimeout(timeout);
+    externalSignal?.removeEventListener("abort", abortRequest);
   }
 }
 
@@ -54,6 +62,6 @@ export function analyze(requestBody: AnalyzeRequest): Promise<AnalyzeResponse> {
   });
 }
 
-export function geocode(query: string): Promise<GeocodeResponse> {
-  return request<GeocodeResponse>(`/api/geocode?q=${encodeURIComponent(query)}`);
+export function geocode(query: string, signal?: AbortSignal): Promise<GeocodeResponse> {
+  return request<GeocodeResponse>(`/api/geocode?q=${encodeURIComponent(query)}`, undefined, signal);
 }
