@@ -148,3 +148,37 @@ def test_duration_ranks_by_whole_minutes_and_keeps_input_order_when_rounded_equa
         fractional_minute_later,
         exact_minute,
     )
+
+
+def test_reason_names_severe_criterion_and_appends_duration_difference():
+    winner = summary_result(
+        "severe winner", {RiskLevel.SEVERE: 2, RiskLevel.LOW: 98}, avg=1.0, duration=1800
+    )
+    other = summary_result(
+        "longer risk route", {RiskLevel.SEVERE: 8, RiskLevel.LOW: 92}, avg=1.0, duration=720
+    )
+    reason = rank_routes([other, winner]).reason
+    assert reason.startswith("6 fewer Severe miles, 18 min longer")
+    assert "tie" not in reason.lower()
+
+
+def test_reason_names_severe_when_no_travel_miles_rounded_equal():
+    winner = summary_result(
+        "severe winner",
+        {RiskLevel.NO_TRAVEL: 1.4, RiskLevel.SEVERE: 2, RiskLevel.LOW: 90},
+    )
+    other = summary_result(
+        "severe loser",
+        {RiskLevel.NO_TRAVEL: 1.1, RiskLevel.SEVERE: 3, RiskLevel.LOW: 90},
+    )
+    reason = rank_routes([other, winner]).reason
+    assert "1 fewer Severe miles" in reason
+    assert "No Travel miles" not in reason
+
+
+def test_reason_names_whole_minute_duration_when_duration_decides():
+    faster = summary_result("faster", {RiskLevel.LOW: 1}, duration=1200)
+    slower = summary_result("slower", {RiskLevel.LOW: 1}, duration=1260)
+    reason = rank_routes([slower, faster]).reason
+    assert reason.startswith("1 min shorter")
+    assert "tie" not in reason.lower()

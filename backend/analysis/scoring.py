@@ -157,26 +157,34 @@ def _missing_note(result: RouteResult) -> str:
 def _reason(best: RouteResult, other: RouteResult) -> str:
     a, b = best.summary, other.summary
     notes: list[str] = []
-    if a.missing_weather_count:
+    if a.incomplete:
         notes.append(f"Recommended route has {_missing_note(best)}")
-    elif b.missing_weather_count and _risk_rank_key(other) < _risk_rank_key(best):
+    elif b.incomplete and _risk_rank_key(other) < _risk_rank_key(best):
         notes.append(
             "A lower-risk-looking route was not recommended because "
             f"{_missing_note(other)}"
         )
 
-    if a.miles_by_level[RiskLevel.NO_TRAVEL] or b.miles_by_level[RiskLevel.NO_TRAVEL]:
-        primary = "Recommended route has fewer No Travel miles"
+    if a.blocked != b.blocked:
+        primary = "Recommended route avoids No Travel checkpoints"
+    elif a.incomplete != b.incomplete:
+        primary = "Recommended route has complete weather data"
     else:
-        severe = round(b.miles_by_level[RiskLevel.SEVERE]) - round(
-            a.miles_by_level[RiskLevel.SEVERE]
+        no_travel = round(a.miles_by_level[RiskLevel.NO_TRAVEL]) - round(
+            b.miles_by_level[RiskLevel.NO_TRAVEL]
         )
-        high = round(b.miles_by_level[RiskLevel.HIGH]) - round(a.miles_by_level[RiskLevel.HIGH])
-        mins = round((a.duration_s - b.duration_s) / 60)
-        if severe:
-            primary = f"{abs(severe)} {'fewer' if severe > 0 else 'more'} Severe miles"
+        severe = round(a.miles_by_level[RiskLevel.SEVERE]) - round(
+            b.miles_by_level[RiskLevel.SEVERE]
+        )
+        high = round(a.miles_by_level[RiskLevel.HIGH]) - round(
+            b.miles_by_level[RiskLevel.HIGH]
+        )
+        if no_travel:
+            primary = f"{abs(no_travel)} {'more' if no_travel > 0 else 'fewer'} No Travel miles"
+        elif severe:
+            primary = f"{abs(severe)} {'more' if severe > 0 else 'fewer'} Severe miles"
         elif high:
-            primary = f"{abs(high)} {'fewer' if high > 0 else 'more'} High miles"
+            primary = f"{abs(high)} {'more' if high > 0 else 'fewer'} High miles"
         elif a.average_risk != b.average_risk and (
             a.average_risk is None or b.average_risk is None
         ):
@@ -185,13 +193,17 @@ def _reason(best: RouteResult, other: RouteResult) -> str:
             a.average_risk, 2
         ) != round(b.average_risk, 2):
             primary = f"Lower average risk ({a.average_risk:.2f} vs {b.average_risk:.2f})"
-        elif mins:
-            primary = (
-                f"{abs(mins)} min {'longer' if mins > 0 else 'shorter'} "
-                "with the same rounded risk"
-            )
         else:
-            primary = "Routes tie on all ranking criteria; this route is listed first"
+            primary = ""
+
+    minutes_difference = round(a.duration_s / 60) - round(b.duration_s / 60)
+    if minutes_difference:
+        duration_note = (
+            f"{abs(minutes_difference)} min {'longer' if minutes_difference > 0 else 'shorter'}"
+        )
+        primary = f"{primary}, {duration_note}" if primary else duration_note
+    elif not primary:
+        primary = "Routes tie on all ranking criteria; this route is listed first"
     return "; ".join([primary, *notes])
 
 
