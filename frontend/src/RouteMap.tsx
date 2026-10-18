@@ -27,7 +27,9 @@ const ORIGIN_LAYER = "active-route-origin";
 const DESTINATION_LAYER = "active-route-destination";
 const HEATMAP_SOURCE = "forecast-risk-points";
 const HEATMAP_LAYER = "forecast-risk-density";
+const HEATMAP_RIBBON_LAYER = "forecast-risk-ribbon";
 const HEATMAP_CIRCLE_LAYER = "forecast-risk-circles";
+const HEATMAP_LOW_CIRCLE_LAYER = "forecast-risk-low-circles";
 const HEATMAP_MISSING_LAYER = "forecast-risk-missing";
 
 interface HeatmapProperties {
@@ -412,22 +414,35 @@ export function RouteMap({
             "case",
             ["boolean", ["get", "weather_missing"], false], 0,
             ["interpolate", ["linear"], ["get", "heat_weight"],
-              0, 0.2, 1, 0.4, 2, 0.6, 3, 0.8, 4, 1],
+              0, 0, 1, 0.3, 2, 0.6, 3, 0.85, 4, 1],
           ],
-          "heatmap-intensity": ["interpolate", ["linear"], ["zoom"], 0, 2.4, 8, 1.8],
-          "heatmap-radius": ["interpolate", ["linear"], ["zoom"], 0, 8, 4, 28, 8, 48],
+          "heatmap-intensity": ["interpolate", ["linear"], ["zoom"], 0, 1, 8, 1],
+          "heatmap-radius": ["interpolate", ["linear"], ["zoom"], 0, 12, 4, 24, 8, 38],
           "heatmap-opacity": ["interpolate", ["linear"], ["zoom"], 0, 0.85, 8, 0.9],
           "heatmap-color": [
             "interpolate", ["linear"], ["heatmap-density"],
             0, "rgba(0,0,0,0)",
-            0.0001, "rgba(30,101,58,0.22)",
-            0.035, getRiskColor("Low"),
-            0.09, getRiskColor("Moderate"),
-            0.17, getRiskColor("High"),
-            0.29, getRiskColor("Severe"),
-            0.5, getRiskColor("No Travel"),
+            0.08, getRiskColor("Moderate"),
+            0.3, getRiskColor("Moderate"),
+            0.6, getRiskColor("High"),
+            0.82, getRiskColor("Severe"),
+            0.96, getRiskColor("No Travel"),
           ],
         } as unknown as Record<string, unknown>,
+      }, firstRouteLayer);
+    }
+    if (!map.getLayer(HEATMAP_RIBBON_LAYER)) {
+      map.addLayer({
+        id: HEATMAP_RIBBON_LAYER,
+        type: "circle",
+        source: HEATMAP_SOURCE,
+        filter: ["==", ["get", "weather_missing"], false],
+        paint: {
+          "circle-radius": ["interpolate", ["linear"], ["zoom"], 0, 12, 4, 26, 8, 42, 12, 58],
+          "circle-color": getRiskColor("Low"),
+          "circle-opacity": 0.25,
+          "circle-blur": 1,
+        },
       }, firstRouteLayer);
     }
     if (!map.getLayer(HEATMAP_CIRCLE_LAYER)) {
@@ -435,8 +450,8 @@ export function RouteMap({
         id: HEATMAP_CIRCLE_LAYER,
         type: "circle",
         source: HEATMAP_SOURCE,
-        minzoom: 9,
-        filter: ["==", ["get", "weather_missing"], false],
+        minzoom: 4,
+        filter: ["all", ["==", ["get", "weather_missing"], false], [">", ["get", "risk_level"], 0]],
         paint: {
           "circle-radius": ["match", ["get", "risk_level"], 0, 2, 1, 4, 2, 5, 3, 6, 4, 6, 4],
           "circle-opacity": ["match", ["get", "risk_level"], 0, 0.42, 1],
@@ -451,6 +466,22 @@ export function RouteMap({
           ],
           "circle-stroke-color": getThemeToken("--surface"),
           "circle-stroke-width": 1.5,
+        },
+      }, firstRouteLayer);
+    }
+    if (!map.getLayer(HEATMAP_LOW_CIRCLE_LAYER)) {
+      map.addLayer({
+        id: HEATMAP_LOW_CIRCLE_LAYER,
+        type: "circle",
+        source: HEATMAP_SOURCE,
+        minzoom: 7,
+        filter: ["all", ["==", ["get", "weather_missing"], false], ["==", ["get", "risk_level"], 0]],
+        paint: {
+          "circle-radius": 2.5,
+          "circle-color": getRiskColor("Low"),
+          "circle-opacity": 0.5,
+          "circle-stroke-color": getThemeToken("--surface"),
+          "circle-stroke-width": 1,
         },
       }, firstRouteLayer);
     }
@@ -469,7 +500,7 @@ export function RouteMap({
         },
       }, firstRouteLayer);
     }
-    for (const layerId of [HEATMAP_LAYER, HEATMAP_CIRCLE_LAYER, HEATMAP_MISSING_LAYER]) {
+    for (const layerId of [HEATMAP_LAYER, HEATMAP_RIBBON_LAYER, HEATMAP_CIRCLE_LAYER, HEATMAP_LOW_CIRCLE_LAYER, HEATMAP_MISSING_LAYER]) {
       map.setLayoutProperty(layerId, "visibility", heatmapEnabled ? "visible" : "none");
     }
   }, [loaded, heatmapData, heatmapEnabled]);

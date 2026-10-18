@@ -62,13 +62,14 @@ function localTimezoneLabel(value: string): string {
 }
 
 function localHeatmapTime(value: string, departureValue: string): string {
-  const hourOffset = Math.round((Date.parse(value) - Date.parse(departureValue)) / 3_600_000);
-  return new Date(value).toLocaleString(undefined, {
-    weekday: "short",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }) + ` (+${hourOffset} h)`;
+  const date = new Date(value);
+  const hourOffset = Math.round((date.getTime() - Date.parse(departureValue)) / 3_600_000);
+  const weekday = new Intl.DateTimeFormat(undefined, { weekday: "short" }).format(date);
+  const localTime = new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit", hour12: false }).format(date);
+  const utcTime = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "UTC", hour: "2-digit", minute: "2-digit", hour12: false,
+  }).format(date);
+  return `${weekday} ${localTime} (+${hourOffset} h) · ${utcTime} UTC`;
 }
 
 function HeatmapPanel({
@@ -155,11 +156,17 @@ function defaultDeparture(): string {
 
 function formatDuration(seconds: number): string {
   const minutes = Math.round(seconds / 60);
-  return `${Math.floor(minutes / 60)}:${String(minutes % 60).padStart(2, "0")}`;
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  return hours ? `${hours} h ${remainingMinutes} min` : `${remainingMinutes} min`;
 }
 
 function formatMiles(miles: number): string {
-  return `${miles.toFixed(0)} mi`;
+  return `${Math.round(miles).toLocaleString()} mi`;
+}
+
+function formatCheckpointCount(count: number): string {
+  return `${count.toLocaleString()} checkpoint${count === 1 ? "" : "s"}`;
 }
 
 function getRiskLabel(level: RiskLevel | null): RiskLabel {
@@ -307,8 +314,10 @@ function RouteCard({
   onSelect: () => void;
 }) {
   const level = getRiskLabel(route.summary.max_level);
-  const routeReason = route.checkpoints.find((checkpoint) => checkpoint.reasons.length > 0)?.reasons[0];
-  const explanation = recommended ? reason : routeReason;
+  const maxRiskCheckpoint = route.summary.max_level && route.summary.max_level !== "Low"
+    ? route.checkpoints.find((checkpoint) => checkpoint.risk_level === route.summary.max_level && checkpoint.reasons.length > 0)
+    : undefined;
+  const explanation = maxRiskCheckpoint?.reasons.join("; ") || reason;
 
   return (
     <li className="timeline-item">
@@ -336,19 +345,19 @@ function RouteCard({
           <span><b className="risk-dot risk-dot--severe" />Severe <strong>{formatMiles(route.summary.miles_by_level.Severe)}</strong></span>
           <span><b className="risk-dot risk-dot--high" />High <strong>{formatMiles(route.summary.miles_by_level.High)}</strong></span>
           {route.summary.missing_weather_count > 0 && (
-            <span className="route-card__missing">Weather missing · {formatMiles(route.summary.missing_weather_miles)} · {route.summary.missing_weather_count} checkpoints</span>
+            <span className="route-card__missing">Weather missing · {formatMiles(route.summary.missing_weather_miles)} · {formatCheckpointCount(route.summary.missing_weather_count)}</span>
           )}
         </span>
         {explanation && <span className="route-card__reason">{explanation}</span>}
         <span className="route-card__footer">
           <span>
             {route.summary.unstable_checkpoints > 0
-              ? `${route.summary.unstable_checkpoints} checkpoints may change ±2 h`
+              ? `${formatCheckpointCount(route.summary.unstable_checkpoints)} may change risk if timing shifts by 2 h`
               : route.summary.unknown_stability_checkpoints > 0
-                ? `Stability unknown for ${route.summary.unknown_stability_checkpoints}`
+                ? `Stability unknown for ${formatCheckpointCount(route.summary.unknown_stability_checkpoints)}`
                 : "Stable within a ±2 h shift"}
             {route.summary.unknown_stability_checkpoints > 0 && route.summary.unstable_checkpoints > 0
-              ? ` · ${route.summary.unknown_stability_checkpoints} unknown`
+              ? ` · ${formatCheckpointCount(route.summary.unknown_stability_checkpoints)} unknown`
               : ""}
           </span>
           <Ellipsis size={16} aria-hidden="true" />

@@ -133,7 +133,7 @@ button:focus-visible, input:focus-visible, summary:focus-visible, [role="radio"]
 .heatmap-credit a { color: var(--link); }
 .heatmap-perf { position: absolute; z-index: 2; right: var(--space-4); bottom: 118px; display: grid; gap: var(--space-1); max-width: 280px; padding: var(--space-3); color: var(--text); font-size: var(--font-12); background: var(--attribution-bg); border: 1px solid var(--divider); border-radius: var(--radius-card); box-shadow: var(--card-shadow); }
 .heatmap-perf strong { font-weight: var(--weight-semibold); }
-.map-compass-reset { position: absolute; z-index: 2; right: var(--space-3); bottom: 98px; display: grid; width: var(--touch-target); height: var(--touch-target); place-items: center; color: var(--text); background: var(--surface); border: 1px solid var(--divider); border-radius: var(--radius-control); box-shadow: var(--card-shadow); cursor: pointer; }
+.map-compass-reset { position: absolute; z-index: 2; right: var(--space-4); bottom: 136px; display: grid; width: var(--touch-target); height: var(--touch-target); place-items: center; color: var(--text); background: var(--surface); border: 1px solid var(--divider); border-radius: var(--radius-control); box-shadow: var(--card-shadow); cursor: pointer; }
 .map-compass-reset:hover { color: var(--primary); }
 .map-compass-reset:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 .empty-state { display: flex; align-items: center; gap: var(--space-2); min-height: 56px; padding: var(--space-3); color: var(--muted); font-size: var(--font-12); background: var(--footer-bg); border-radius: var(--radius-card); }
@@ -184,7 +184,7 @@ button:focus-visible, input:focus-visible, summary:focus-visible, [role="radio"]
   .risk-legend { top: var(--space-4); right: var(--space-4); left: var(--space-4); max-width: none; }
   .maplibregl-ctrl-bottom-right { right: var(--space-3) !important; bottom: calc(60dvh + var(--space-6)) !important; }
   .maplibregl-ctrl-attrib { display: block !important; }
-  .map-compass-reset { right: var(--space-3); bottom: calc(60dvh + 116px); }
+  .map-compass-reset { right: var(--space-3); bottom: calc(60dvh + 120px); }
 }
 @media (max-width: 390px) {
   .checkpoint-row { grid-template-columns: 22px 1fr 1.2fr auto; gap: var(--space-1); }
