@@ -95,10 +95,11 @@ export function PlacePicker({ id, label, value, onChange }: PlacePickerProps) {
   const listOpen = !dismissed && (loading || results.length > 0 || Boolean(status));
 
   return (
-    <div>
-      <label htmlFor={id}>{label} </label>
+    <div className="place-picker">
+      <label className="field-label" htmlFor={id}>{label}</label>
       <input
         id={id}
+        className="field-input place-picker__input"
         role="combobox"
         aria-autocomplete="list"
         aria-expanded={listOpen}
@@ -114,14 +115,15 @@ export function PlacePicker({ id, label, value, onChange }: PlacePickerProps) {
           setDismissed(false);
         }}
       />
-      {value && <p>Selected: {value.label}</p>}
+      {value && <p className="selected-place">Selected place · {value.label}</p>}
       {listOpen && (
-        <ul id={listId} role="listbox" aria-label={`${label} matches`}>
-          {loading && <li role="status">Searching places…</li>}
-          {status && <li role="status">{status}</li>}
+        <ul className="place-picker__list" id={listId} role="listbox" aria-label={`${label} matches`}>
+          {loading && <li className="place-picker__status" role="status">Searching places…</li>}
+          {status && <li className="place-picker__status" role="status">{status}</li>}
           {results.map((place, index) => (
             <li key={`${place.lat},${place.lon},${place.label}`} role="presentation">
               <button
+                className="place-picker__option"
                 id={`${listId}-${index}`}
                 type="button"
                 role="option"
