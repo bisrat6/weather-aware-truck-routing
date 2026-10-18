@@ -170,6 +170,10 @@ function formatCheckpointCount(count: number): string {
   return `${count.toLocaleString()} checkpoint${count === 1 ? "" : "s"}`;
 }
 
+function signedDelta(value: number): string {
+  return `${value > 0 ? "+" : ""}${value.toLocaleString()}`;
+}
+
 function getRiskLabel(level: RiskLevel | null): RiskLabel {
   return level ?? "No data";
 }
@@ -304,20 +308,38 @@ function RouteCard({
   route,
   recommended,
   selected,
-  reason,
+  recommendationReason,
+  recommendedRoute,
+  nextRankedRoute,
   onSelect,
 }: {
   route: AnalyzedRoute;
   recommended: boolean;
   selected: boolean;
-  reason: string;
+  recommendationReason: string;
+  recommendedRoute: AnalyzedRoute;
+  nextRankedRoute: AnalyzedRoute | undefined;
   onSelect: () => void;
 }) {
   const level = getRiskLabel(route.summary.max_level);
   const maxRiskCheckpoint = route.summary.max_level && route.summary.max_level !== "Low"
     ? route.checkpoints.find((checkpoint) => checkpoint.risk_level === route.summary.max_level && checkpoint.reasons.length > 0)
     : undefined;
-  const explanation = maxRiskCheckpoint?.reasons.join("; ") || reason;
+  let explanation = recommendationReason;
+  if (recommended && nextRankedRoute && /\b(shorter|longer)[.!?]*$/i.test(recommendationReason.trim())) {
+    explanation = `${recommendationReason.trim().replace(/[.!?]+$/, "")} than Route ${nextRankedRoute.route_index + 1}`;
+  } else if (!recommended) {
+    const minutesDelta = Math.round(route.duration_s / 60) - Math.round(recommendedRoute.duration_s / 60);
+    const milesDelta = Math.round(route.distance_mi) - Math.round(recommendedRoute.distance_mi);
+    const comparison = `${signedDelta(minutesDelta)} min, ${signedDelta(milesDelta)} mi vs Route ${recommendedRoute.route_index + 1}`;
+    const severeDelta = Math.round(route.summary.miles_by_level.Severe) - Math.round(recommendedRoute.summary.miles_by_level.Severe);
+    const highDelta = Math.round(route.summary.miles_by_level.High) - Math.round(recommendedRoute.summary.miles_by_level.High);
+    const higherRiskMiles = [
+      severeDelta > 0 ? `+${severeDelta.toLocaleString()} Severe mi` : "",
+      highDelta > 0 ? `+${highDelta.toLocaleString()} High mi` : "",
+    ].filter(Boolean);
+    explanation = [comparison, ...higherRiskMiles, maxRiskCheckpoint?.reasons[0] ?? ""].filter(Boolean).join(" · ");
+  }
 
   return (
     <li className="timeline-item">
@@ -520,6 +542,9 @@ export default function App() {
   }
 
   const routes = data ? rankedRoutes(data) : [];
+  const recommendedRoute = routes.find((route) => route.route_index === data?.recommended);
+  const recommendedPosition = routes.findIndex((route) => route.route_index === data?.recommended);
+  const nextRankedRoute = recommendedPosition >= 0 ? routes[recommendedPosition + 1] : undefined;
   const levelsDemoEnabled = import.meta.env.DEV && new URLSearchParams(window.location.search).get("demo") === "levels";
 
   function handleTabKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
@@ -635,7 +660,9 @@ export default function App() {
                         route={route}
                         recommended={route.route_index === data.recommended}
                         selected={route.route_index === (selectedRoute ?? data.recommended)}
-                        reason={data.recommendation_reason}
+                        recommendationReason={data.recommendation_reason}
+                        recommendedRoute={recommendedRoute ?? route}
+                        nextRankedRoute={nextRankedRoute}
                         onSelect={() => setSelectedRoute(route.route_index)}
                       />
                     ))}
