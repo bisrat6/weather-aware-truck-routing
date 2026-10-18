@@ -97,6 +97,10 @@ counts include true flags in `unstable_checkpoints` and unknown flags in
 `unknown_stability_checkpoints`. Stability does not affect route ranking or recommendation.
 When fewer than three routes are returned, `notices` includes
 `"Only N routes available from the provider"`. No synthetic route is added.
+`notices` also includes a plain-language warning if the recommended route contains any
+No Travel checkpoint or has missing weather data; the latter gives missing miles and
+checkpoint count. `recommendation_reason` names the criterion that decided the ranking
+and includes the rounded duration difference when it is nonzero.
 
 Validation errors return HTTP 400. Invalid, unavailable, or expired Mapbox route requests
 return HTTP 502. Weather service failures return HTTP 502; rate limits return HTTP 429 and

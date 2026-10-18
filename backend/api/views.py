@@ -92,6 +92,15 @@ def analyze(request: Request) -> Response:
     notices = []
     if len(routes) < 3:
         notices.append(f"Only {len(routes)} routes available from the provider")
+    recommended_summary = ranking.recommended.summary
+    if recommended_summary.blocked:
+        notices.append("Recommended route is blocked because it contains a No Travel checkpoint")
+    if recommended_summary.incomplete:
+        notices.append(
+            "Recommended route has incomplete weather data: "
+            f"{recommended_summary.missing_weather_miles:.1f} miles across "
+            f"{recommended_summary.missing_weather_count} checkpoints"
+        )
     return Response(
         {
             "routes": [

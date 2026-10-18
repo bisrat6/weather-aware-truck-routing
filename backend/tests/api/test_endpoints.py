@@ -92,6 +92,32 @@ def mock_both_providers(monkeypatch, *, weather_status=200, missing_cell=False):
     monkeypatch.setattr("requests.get", get)
 
 
+def mock_weather_for_all_route_cells(monkeypatch, *, wind_mph=None):
+    def get(url, params=None, timeout=None):
+        if "directions/v5" in url:
+            return route_response()
+        if "open-meteo.com" in url:
+            template = recorded_weather()[0]
+            locations = []
+            for index, (lat, lon) in enumerate(
+                zip(params["latitude"].split(","), params["longitude"].split(","), strict=True)
+            ):
+                item = copy.deepcopy(template)
+                item["latitude"], item["longitude"] = float(lat), float(lon)
+                if index:
+                    item["location_id"] = index
+                item["hourly"]["wind_speed_10m"] = (
+                    [None] * len(item["hourly"]["time"])
+                    if wind_mph is None
+                    else [wind_mph] * len(item["hourly"]["time"])
+                )
+                locations.append(item)
+            return FakeResponse(body=locations if len(locations) > 1 else locations[0])
+        raise AssertionError(f"unexpected upstream {url}")
+
+    monkeypatch.setattr("requests.get", get)
+
+
 def test_analyze_happy_path_uses_recorded_fixtures_and_provider_notice(client, monkeypatch):
     mock_both_providers(monkeypatch)
     response = client.post("/api/analyze", body(), format="json")
@@ -111,6 +137,25 @@ def test_analyze_happy_path_uses_recorded_fixtures_and_provider_notice(client, m
     assert data["notices"] == [
         f"Only {len(data['routes'])} routes available from the provider"
     ]
+
+
+def test_analyze_notice_discloses_recommended_blocked_route(client, monkeypatch):
+    mock_weather_for_all_route_cells(monkeypatch, wind_mph=50)
+    response = client.post("/api/analyze", body(load_lb=34_000), format="json")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["routes"][data["recommended"]]["summary"]["max_level"] == "No Travel"
+    assert any("blocked" in notice.lower() for notice in data["notices"])
+
+
+def test_analyze_notice_discloses_recommended_incomplete_route(client, monkeypatch):
+    mock_weather_for_all_route_cells(monkeypatch)
+    response = client.post("/api/analyze", body(), format="json")
+    assert response.status_code == 200
+    data = response.json()
+    summary = data["routes"][data["recommended"]]["summary"]
+    assert summary["missing_weather_count"] > 0
+    assert any("incomplete weather data" in notice.lower() for notice in data["notices"])
 
 
 @pytest.mark.parametrize(
