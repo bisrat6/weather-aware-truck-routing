@@ -8,7 +8,6 @@ import {
   Ellipsis,
   Info,
   Route as RouteIcon,
-  Truck,
   Weight,
 } from "lucide-react";
 import { analyze } from "./api";
@@ -330,7 +329,9 @@ export default function App() {
         </button>
         <div className="trip-panel__content">
           <header className="panel-header">
-            <div className="app-icon"><Truck size={20} strokeWidth={1.8} /></div>
+            <div className="app-icon">
+              <img src="/worldwise-icon.png" alt="World Wise" />
+            </div>
             <div className="panel-header__text">
               <h1>Weather-Aware Routing</h1>
               <p>Safest route for your load</p>

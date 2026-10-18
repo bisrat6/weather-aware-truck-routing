@@ -25,7 +25,8 @@ button:focus-visible, input:focus-visible, summary:focus-visible, [role="radio"]
 }
 .trip-panel__content { min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-color: var(--field-border) transparent; scrollbar-width: thin; }
 .panel-header { display: flex; align-items: center; gap: var(--space-3); min-height: 76px; padding: var(--space-4); border-bottom: 1px solid var(--divider); }
-.app-icon { display: grid; width: 40px; height: 40px; flex: 0 0 40px; place-items: center; color: var(--primary); background: var(--info-bg); border: 1px solid var(--divider); border-radius: var(--radius-control); }
+.app-icon { display: grid; width: 40px; height: 40px; flex: 0 0 40px; place-items: center; color: var(--primary); background: transparent; border: 1px solid transparent; border-radius: var(--radius-control); }
+.app-icon img { display: block; width: 28px; height: 28px; object-fit: contain; }
 .panel-header__text { min-width: 0; }
 .panel-header h1 { margin: 0; font-size: var(--font-14); font-weight: var(--weight-bold); line-height: var(--line-tight); }
 .panel-header p { margin: var(--space-1) 0 0; color: var(--link); font-size: var(--font-12); font-weight: var(--weight-medium); }
