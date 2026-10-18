@@ -23,6 +23,9 @@ class CheckpointResult:
     owned_mi: float
     weather_missing: bool
     missing_reason: str | None = None
+    risk_level_minus_2h: RiskLevel | None = None
+    risk_level_plus_2h: RiskLevel | None = None
+    unstable: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -34,6 +37,8 @@ class RouteSummary:
     eta_method: str
     missing_weather_count: int
     missing_weather_miles: float
+    unstable_checkpoints: int = 0
+    unknown_stability_checkpoints: int = 0
 
 
 @dataclass(frozen=True)

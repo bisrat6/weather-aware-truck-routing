@@ -20,6 +20,8 @@ class StubWeather:
 
     def weather_at_many(self, queries):
         self.queries = list(queries)
+        if len(self.samples) * 3 == len(queries):
+            return [sample for sample in self.samples for _ in range(3)]
         return self.samples
 
 
@@ -205,3 +207,4 @@ def test_full_run_uses_recorded_route_and_weather_fixture_with_mocked_http(monke
         route.cum_dist_m[-1] / 1609.344
     )
     assert calls  # proves the complete flow exercised the mocked HTTP boundary
+    assert len(calls) == 1  # stability used the same batched request; it made no extra fetch

@@ -101,6 +101,13 @@ def test_analyze_happy_path_uses_recorded_fixtures_and_provider_notice(client, m
     assert sorted(data["ranking"]) == list(range(len(data["routes"])))
     assert data["recommended"] == data["ranking"][0]
     assert data["routes"][0]["checkpoints"]
+    checkpoint = data["routes"][0]["checkpoints"][0]
+    levels = {"Low", "Moderate", "High", "Severe", "No Travel", None}
+    assert checkpoint["risk_level_minus_2h"] in levels
+    assert checkpoint["risk_level_plus_2h"] in levels
+    assert checkpoint["unstable"] in {True, False, None}
+    assert "unstable_checkpoints" in data["routes"][0]["summary"]
+    assert "unknown_stability_checkpoints" in data["routes"][0]["summary"]
     assert data["notices"] == [
         f"Only {len(data['routes'])} routes available from the provider"
     ]

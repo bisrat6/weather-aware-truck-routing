@@ -32,11 +32,18 @@ def analyze_route(
         raise ValueError("departure_utc must be timezone-aware")
     departure = departure_utc.astimezone(UTC)
     checkpoints = sample_checkpoints(route, interval_miles)
-    queries = [
-        (cp.lat, cp.lon, departure + timedelta(seconds=cp.eta_offset_s)) for cp in checkpoints
-    ]
+    queries = []
+    for cp in checkpoints:
+        eta = departure + timedelta(seconds=cp.eta_offset_s)
+        queries.extend(
+            (
+                (cp.lat, cp.lon, eta - timedelta(hours=2)),
+                (cp.lat, cp.lon, eta),
+                (cp.lat, cp.lon, eta + timedelta(hours=2)),
+            )
+        )
     weather_results = list(weather_service.weather_at_many(queries))
-    if len(weather_results) != len(checkpoints):
+    if len(weather_results) != len(queries):
         raise ValueError("weather service returned a different number of results than requested")
 
     output: list[CheckpointResult] = []
@@ -45,14 +52,36 @@ def analyze_route(
     scored_miles = 0.0
     missing_weather_miles = 0.0
     levels: list[RiskLevel] = []
-    for cp, eta, sample in zip(checkpoints, queries, weather_results, strict=True):
-        eta_utc = eta[2]
+    unstable_values: list[bool | None] = []
+    for index, cp in enumerate(checkpoints):
+        minus_sample, sample, plus_sample = weather_results[index * 3 : index * 3 + 3]
+        eta_utc = queries[index * 3 + 1][2]
+        minus_assessment = (
+            None
+            if isinstance(minus_sample, MissingWeather)
+            else assess_checkpoint(
+                Weather(minus_sample.wind_mph, minus_sample.rain_in_hr, minus_sample.snow_in_hr),
+                load_lb,
+            )
+        )
+        plus_assessment = (
+            None
+            if isinstance(plus_sample, MissingWeather)
+            else assess_checkpoint(
+                Weather(plus_sample.wind_mph, plus_sample.rain_in_hr, plus_sample.snow_in_hr),
+                load_lb,
+            )
+        )
+        minus_level = minus_assessment.level if minus_assessment else None
+        plus_level = plus_assessment.level if plus_assessment else None
         if isinstance(sample, MissingWeather):
             missing_weather_miles += cp.owned_mi
+            unstable_values.append(None)
             output.append(
                 CheckpointResult(
                     cp.index, cp.lat, cp.lon, cp.dist_mi, eta_utc,
                     None, None, None, None, (), cp.owned_mi, True, str(sample),
+                    minus_level, plus_level, None,
                 )
             )
             continue
@@ -64,11 +93,18 @@ def analyze_route(
         risk_weighted += int(assessment.level) * cp.owned_mi
         scored_miles += cp.owned_mi
         levels.append(assessment.level)
+        unstable = (
+            None
+            if minus_level is None or plus_level is None
+            else minus_level != assessment.level or plus_level != assessment.level
+        )
+        unstable_values.append(unstable)
         output.append(
             CheckpointResult(
                 cp.index, cp.lat, cp.lon, cp.dist_mi, eta_utc,
                 sample.wind_mph, sample.rain_in_hr, sample.snow_in_hr,
                 assessment.level, assessment.reasons, cp.owned_mi, False,
+                None, minus_level, plus_level, unstable,
             )
         )
 
@@ -80,6 +116,8 @@ def analyze_route(
         eta_method=route.eta_method,
         missing_weather_count=sum(cp.weather_missing for cp in output),
         missing_weather_miles=missing_weather_miles,
+        unstable_checkpoints=sum(value is True for value in unstable_values),
+        unknown_stability_checkpoints=sum(value is None for value in unstable_values),
     )
     return RouteResult(tuple(output), summary, route.origin_label)
 
