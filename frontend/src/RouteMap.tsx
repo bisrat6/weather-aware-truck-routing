@@ -6,20 +6,24 @@ import Map, {
   type MapRef,
 } from "react-map-gl/maplibre";
 import { GeoJSONSource } from "maplibre-gl";
+import type { ExpressionSpecification } from "@maplibre/maplibre-gl-style-spec";
 import type { Feature, FeatureCollection, LineString, Point } from "geojson";
 import {
   BASEMAP_STYLE,
-  DESIGN,
-  MAP_FIT_PADDING,
+  getRiskColor,
+  getThemeToken,
   MAP_INITIAL_VIEW,
-  RISK_COLORS,
   RISK_LEVELS,
+  riskColorToken,
   type RiskLabel,
 } from "./constants";
 import type { AnalyzedRoute, Checkpoint, RiskLevel } from "./types";
 
 const CHECKPOINT_SOURCE = "active-route-checkpoints";
 const CHECKPOINT_LAYER = "checkpoint-risk-markers";
+const ENDPOINT_SOURCE = "active-route-endpoints";
+const ORIGIN_LAYER = "active-route-origin";
+const DESTINATION_LAYER = "active-route-destination";
 
 interface RouteMapProps {
   routes: AnalyzedRoute[];
@@ -35,6 +39,14 @@ function markerShape(label: RiskLabel): string {
   return RISK_LEVELS.find((level) => level.label === label)!.marker;
 }
 
+function CheckpointRiskBadge({ level }: { level: RiskLabel }) {
+  return (
+    <span className="risk-badge" style={{ "--risk-color": `var(${riskColorToken(level)})` } as CSSProperties}>
+      <span className="risk-badge__symbol" aria-hidden="true">{markerShape(level)}</span>{level}
+    </span>
+  );
+}
+
 function routeFeature(route: AnalyzedRoute): Feature<LineString> {
   return {
     type: "Feature",
@@ -48,6 +60,27 @@ function routeCollection(route: AnalyzedRoute): FeatureCollection<LineString> {
   return { type: "FeatureCollection", features: [routeFeature(route)] };
 }
 
+function routeRiskGradient(route: AnalyzedRoute): ExpressionSpecification {
+  const checkpoints = route.checkpoints;
+  const first = checkpoints[0];
+  const totalMiles = checkpoints.at(-1)?.dist_mi || route.distance_mi;
+  const expression: unknown[] = [
+    "step",
+    ["line-progress"],
+    getRiskColor(riskLabel(first?.risk_level ?? route.summary.max_level)),
+  ];
+  let previousProgress = 0;
+  for (let index = 1; index < checkpoints.length; index += 1) {
+    const previous = checkpoints[index - 1];
+    const checkpoint = checkpoints[index];
+    const progress = ((previous.dist_mi + checkpoint.dist_mi) / 2) / totalMiles;
+    if (!Number.isFinite(progress) || progress <= previousProgress || progress > 1) continue;
+    expression.push(progress, getRiskColor(riskLabel(checkpoint.risk_level)));
+    previousProgress = progress;
+  }
+  return expression as unknown as ExpressionSpecification;
+}
+
 function checkpointCollection(route: AnalyzedRoute | null): FeatureCollection<Point> {
   return {
     type: "FeatureCollection",
@@ -59,12 +92,24 @@ function checkpointCollection(route: AnalyzedRoute | null): FeatureCollection<Po
         properties: {
           checkpoint_index: checkpoint.index,
           risk_label: level,
-          marker: markerShape(level),
-          marker_color: RISK_COLORS[level],
+          marker_color: getRiskColor(level),
         },
         geometry: { type: "Point" as const, coordinates: [checkpoint.lon, checkpoint.lat] },
       };
     }),
+  };
+}
+
+function endpointCollection(route: AnalyzedRoute | null): FeatureCollection<Point> {
+  const coordinates = route?.geometry.coordinates ?? [];
+  if (coordinates.length < 2) return { type: "FeatureCollection", features: [] };
+  const [origin, destination] = [coordinates[0], coordinates[coordinates.length - 1]];
+  return {
+    type: "FeatureCollection",
+    features: [
+      { type: "Feature", properties: { kind: "origin" }, geometry: { type: "Point", coordinates: origin } },
+      { type: "Feature", properties: { kind: "destination" }, geometry: { type: "Point", coordinates: destination } },
+    ],
   };
 }
 
@@ -97,10 +142,8 @@ function CheckpointPopup({
       className="checkpoint-popup"
     >
       <div className="checkpoint-popup__heading">
-        <span className="eyebrow">Checkpoint {checkpoint.index + 1}</span>
-        <span className="risk-label" style={{ "--risk-color": RISK_COLORS[level] } as CSSProperties}>
-          <span className="risk-mark" aria-hidden="true">{markerShape(level)}</span> {level}
-        </span>
+        <strong>Checkpoint {checkpoint.index + 1}</strong>
+        <CheckpointRiskBadge level={level} />
       </div>
       <dl className="checkpoint-popup__times">
         <div><dt>Local ETA</dt><dd>{localEta(checkpoint.eta_utc)}</dd></div>
@@ -162,30 +205,43 @@ export function RouteMap({ routes, recommended, selectedRoute }: RouteMapProps) 
       if (source instanceof GeoJSONSource) {
         source.setData(collection);
       } else {
-        map.addSource(sourceId, { type: "geojson", data: collection });
+        map.addSource(sourceId, { type: "geojson", data: collection, lineMetrics: true });
+        map.addLayer({
+          id: `${sourceId}-halo`,
+          type: "line",
+          source: sourceId,
+          layout: { "line-cap": "round", "line-join": "round" },
+          paint: {
+            "line-color": getThemeToken("--surface"),
+            "line-width": ["case", ["boolean", ["feature-state", "selected"], false], 10, 0],
+            "line-opacity": ["case", ["boolean", ["feature-state", "selected"], false], 1, 0],
+          },
+        });
         map.addLayer({
           id: layerId,
           type: "line",
           source: sourceId,
           layout: { "line-cap": "round", "line-join": "round" },
           paint: {
-            "line-color": RISK_COLORS[riskLabel(route.summary.max_level)],
-            "line-width": ["case", ["boolean", ["feature-state", "selected"], false], 5, 3],
-            "line-opacity": ["case", ["boolean", ["feature-state", "selected"], false], 0.96, 0.24],
-            "line-blur": ["case", ["boolean", ["feature-state", "selected"], false], 0, 0.35],
+            "line-color": getRiskColor(riskLabel(route.summary.max_level)),
+            "line-gradient": routeRiskGradient(route),
+            "line-width": ["case", ["boolean", ["feature-state", "selected"], false], 6, 3],
+            "line-opacity": ["case", ["boolean", ["feature-state", "selected"], false], 1, 0.6],
           },
         });
       }
-      map.setPaintProperty(layerId, "line-color", RISK_COLORS[riskLabel(route.summary.max_level)]);
+      map.setPaintProperty(layerId, "line-color", getRiskColor(riskLabel(route.summary.max_level)));
+      map.setPaintProperty(layerId, "line-gradient", routeRiskGradient(route));
     }
 
     for (const layer of map.getStyle().layers ?? []) {
-      if (layer.id.startsWith("route-") && layer.id.endsWith("-line")) {
-        const routeIndex = layer.id.slice("route-".length, -"-line".length);
-        if (!routeIds.has(routeIndex)) {
-          map.removeLayer(layer.id);
-          if (map.getSource(`route-${routeIndex}`)) map.removeSource(`route-${routeIndex}`);
-        }
+      if (!layer.id.startsWith("route-")) continue;
+      const routeIndex = layer.id.slice("route-".length).replace(/-(?:halo|line)$/, "");
+      if (!routeIds.has(routeIndex)) map.removeLayer(layer.id);
+    }
+    for (const sourceId of Object.keys(map.getStyle().sources)) {
+      if (sourceId.startsWith("route-") && !routeIds.has(sourceId.slice("route-".length))) {
+        map.removeSource(sourceId);
       }
     }
 
@@ -198,24 +254,47 @@ export function RouteMap({ routes, recommended, selectedRoute }: RouteMapProps) 
     if (!map.getLayer(CHECKPOINT_LAYER)) {
       map.addLayer({
         id: CHECKPOINT_LAYER,
-        type: "symbol",
+        type: "circle",
         source: CHECKPOINT_SOURCE,
-        layout: {
-          "text-field": ["get", "marker"],
-          "text-font": ["Noto Sans Regular"],
-          "text-size": Number.parseInt(DESIGN.type.sizeLg, 10),
-          "text-allow-overlap": true,
-          "text-ignore-placement": true,
-          "text-anchor": "center",
-        },
         paint: {
-          "text-color": ["get", "marker_color"],
-          "text-halo-color": DESIGN.color.mapMarkerHalo,
-          "text-halo-width": 2,
+          "circle-radius": 6,
+          "circle-color": ["get", "marker_color"],
+          "circle-stroke-color": getThemeToken("--surface"),
+          "circle-stroke-width": 2,
         },
       });
     }
+
+    if (!map.getSource(ENDPOINT_SOURCE)) {
+      map.addSource(ENDPOINT_SOURCE, { type: "geojson", data: endpointCollection(null) });
+    }
+    if (!map.getLayer(ORIGIN_LAYER)) {
+      map.addLayer({
+        id: ORIGIN_LAYER,
+        type: "circle",
+        source: ENDPOINT_SOURCE,
+        filter: ["==", ["get", "kind"], "origin"],
+        paint: {
+          "circle-radius": 8,
+          "circle-color": getThemeToken("--surface"),
+          "circle-stroke-color": getThemeToken("--primary"),
+          "circle-stroke-width": 3,
+        },
+      });
+    }
+    if (!map.getLayer(DESTINATION_LAYER)) {
+      map.addLayer({
+        id: DESTINATION_LAYER,
+        type: "symbol",
+        source: ENDPOINT_SOURCE,
+        filter: ["==", ["get", "kind"], "destination"],
+        layout: { "text-field": "▼", "text-font": ["Noto Sans Regular"], "text-size": 18, "text-anchor": "bottom", "text-allow-overlap": true },
+        paint: { "text-color": getThemeToken("--primary"), "text-halo-color": getThemeToken("--surface"), "text-halo-width": 2 },
+      });
+    }
     map.moveLayer(CHECKPOINT_LAYER);
+    map.moveLayer(ORIGIN_LAYER);
+    map.moveLayer(DESTINATION_LAYER);
 
     let west = Infinity;
     let south = Infinity;
@@ -234,7 +313,12 @@ export function RouteMap({ routes, recommended, selectedRoute }: RouteMapProps) 
     if (hasCoordinates) {
       map.fitBounds(
         [[west, south], [east, north]],
-        { padding: MAP_FIT_PADDING, duration: 0 },
+        {
+          padding: window.innerWidth < 768
+            ? { top: 20, right: 20, bottom: window.innerHeight * 0.62, left: 20 }
+            : { top: 76, right: 24, bottom: 100, left: 380 },
+          duration: 0,
+        },
       );
     }
   }, [loaded, routes]);
@@ -248,11 +332,14 @@ export function RouteMap({ routes, recommended, selectedRoute }: RouteMapProps) 
       if (!map.getSource(source) || !map.getLayer(layer)) continue;
       map.setFeatureState(
         { source, id: route.route_index },
-        { selected: route.route_index === selectedRoute?.route_index },
+        { selected: route.route_index === (selectedRoute?.route_index ?? recommended) },
       );
     }
     if (selectedRoute && map.getLayer(`route-${selectedRoute.route_index}-line`)) {
-      map.moveLayer(`route-${selectedRoute.route_index}-line`, CHECKPOINT_LAYER);
+      const lineId = `route-${selectedRoute.route_index}-line`;
+      const haloId = `route-${selectedRoute.route_index}-halo`;
+      map.moveLayer(lineId, CHECKPOINT_LAYER);
+      map.moveLayer(haloId, lineId);
     }
   }, [loaded, recommended, routes, selectedRoute]);
 
@@ -261,6 +348,8 @@ export function RouteMap({ routes, recommended, selectedRoute }: RouteMapProps) 
     if (!loaded || !map) return;
     const source = map.getSource(CHECKPOINT_SOURCE);
     if (source instanceof GeoJSONSource) source.setData(checkpointCollection(selectedRoute));
+    const endpointSource = map.getSource(ENDPOINT_SOURCE);
+    if (endpointSource instanceof GeoJSONSource) endpointSource.setData(endpointCollection(selectedRoute));
   }, [loaded, selectedRoute]);
 
   const handleMapClick = useCallback(
@@ -280,13 +369,13 @@ export function RouteMap({ routes, recommended, selectedRoute }: RouteMapProps) 
         ref={mapRef}
         initialViewState={MAP_INITIAL_VIEW}
         mapStyle={BASEMAP_STYLE}
-        attributionControl={{}}
+        attributionControl={{ compact: false, customAttribution: "Weather data: Open-Meteo" }}
         interactiveLayerIds={[CHECKPOINT_LAYER]}
         onClick={handleMapClick}
         onLoad={() => setLoaded(true)}
         style={{ width: "100%", height: "100%" }}
       >
-        <NavigationControl position="top-right" showCompass={false} />
+        <NavigationControl position="bottom-right" showCompass />
         {popupCheckpoint && (
           <CheckpointPopup checkpoint={popupCheckpoint} onClose={() => setPopupCheckpoint(null)} />
         )}

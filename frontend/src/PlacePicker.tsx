@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { Flag, MapPin } from "lucide-react";
 import { geocode } from "./api";
 import type { Coordinate, GeocodeResult } from "./types";
 
@@ -22,6 +23,7 @@ export function PlacePicker({ id, label, value, onChange }: PlacePickerProps) {
   const [dismissed, setDismissed] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const listId = `${id}-places`;
+  const PlaceIcon = id === "origin" ? MapPin : Flag;
 
   useEffect(() => {
     const normalized = query.trim();
@@ -96,7 +98,9 @@ export function PlacePicker({ id, label, value, onChange }: PlacePickerProps) {
 
   return (
     <div className="place-picker">
-      <label className="field-label" htmlFor={id}>{label}</label>
+      <label className="field-label" htmlFor={id}>
+        <PlaceIcon size={15} aria-hidden="true" />{label}
+      </label>
       <input
         id={id}
         className="field-input place-picker__input"
