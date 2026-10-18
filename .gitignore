@@ -23,10 +23,11 @@ htmlcov/
 backend/db.sqlite3
 backend/staticfiles/
 
-# Node (frontend comes later)
+# Node
 node_modules/
 dist/
 build/
+*.tsbuildinfo
 
 # OS / editor
 .DS_Store
