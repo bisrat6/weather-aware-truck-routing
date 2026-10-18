@@ -78,6 +78,23 @@ def test_stability_flip_uses_the_load_rule():
     assert scored.checkpoints[0].unstable is True
 
 
+def test_plus_two_hour_stability_uses_load_rule():
+    route = recorded_route()
+    n = len(sample_checkpoints(route, 1000))
+    values = []
+    for index in range(n):
+        values.extend(
+            [sample(20), sample(34.9), sample(35.0)]
+            if index == 0
+            else [sample(20)] * 3
+        )
+    scored = analyze_route(route, NOW, 1000, 45_000, TripletWeather(values))
+    checkpoint = scored.checkpoints[0]
+    assert checkpoint.risk_level == RiskLevel.MODERATE
+    assert checkpoint.risk_level_plus_2h == RiskLevel.SEVERE
+    assert checkpoint.unstable is True
+
+
 def test_missing_shifted_weather_is_unknown_and_counted_separately():
     route = recorded_route()
     n = len(sample_checkpoints(route, 1000))
