@@ -130,22 +130,19 @@ def analyze_route(
     return RouteResult(tuple(output), summary, route.origin_label)
 
 
-def _risk_rank_key(result: RouteResult) -> tuple[bool, float, int, int, float, float]:
+def _risk_rank_key(result: RouteResult) -> tuple[int, int, int, float, int]:
     summary = result.summary
-    no_travel_mi = summary.miles_by_level[RiskLevel.NO_TRAVEL]
-    blocked = summary.blocked
     return (
-        blocked,
-        no_travel_mi if blocked else 0.0,
+        round(summary.miles_by_level[RiskLevel.NO_TRAVEL]),
         round(summary.miles_by_level[RiskLevel.SEVERE]),
         round(summary.miles_by_level[RiskLevel.HIGH]),
         round(summary.average_risk, 2) if summary.average_risk is not None else math.inf,
-        summary.duration_s,
+        round(summary.duration_s / 60),
     )
 
 
-def _rank_key(result: RouteResult) -> tuple[bool, bool, float, int, int, float, float]:
-    return (result.summary.missing_weather_count > 0, *_risk_rank_key(result))
+def _rank_key(result: RouteResult) -> tuple[bool, bool, int, int, int, float, int]:
+    return (result.summary.blocked, result.summary.incomplete, *_risk_rank_key(result))
 
 
 def _missing_note(result: RouteResult) -> str:

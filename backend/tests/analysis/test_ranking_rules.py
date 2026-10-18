@@ -107,3 +107,44 @@ def test_no_travel_bucket_marks_route_blocked_even_when_severe_miles_dominate():
     severe = summary_result("severe", {RiskLevel.SEVERE: 100}, avg=3.0)
     blocked = summary_result("blocked", {RiskLevel.NO_TRAVEL: 1, RiskLevel.LOW: 99}, avg=0.04)
     assert rank_routes([blocked, severe]).recommended is severe
+
+
+def test_blocked_route_ranks_after_incomplete_route():
+    blocked = summary_result(
+        "blocked complete",
+        {RiskLevel.NO_TRAVEL: 1, RiskLevel.LOW: 99},
+        missing_count=0,
+    )
+    incomplete = summary_result(
+        "incomplete but unblocked",
+        {RiskLevel.SEVERE: 20, RiskLevel.LOW: 80},
+        missing_count=1,
+        missing_miles=5,
+    )
+    assert [route.origin_label for route in rank_routes([blocked, incomplete]).ranked_results] == [
+        "incomplete but unblocked",
+        "blocked complete",
+    ]
+
+
+def test_blocked_routes_round_no_travel_miles_before_severe_miles():
+    more_exact_no_travel = summary_result(
+        "severe winner",
+        {RiskLevel.NO_TRAVEL: 1.4, RiskLevel.SEVERE: 2, RiskLevel.LOW: 90},
+    )
+    fewer_exact_no_travel = summary_result(
+        "severe loser",
+        {RiskLevel.NO_TRAVEL: 1.1, RiskLevel.SEVERE: 3, RiskLevel.LOW: 90},
+    )
+    assert rank_routes([fewer_exact_no_travel, more_exact_no_travel]).recommended is (
+        more_exact_no_travel
+    )
+
+
+def test_duration_ranks_by_whole_minutes_and_keeps_input_order_when_rounded_equal():
+    fractional_minute_later = summary_result("first", {RiskLevel.LOW: 1}, duration=1201)
+    exact_minute = summary_result("second", {RiskLevel.LOW: 1}, duration=1200)
+    assert rank_routes([fractional_minute_later, exact_minute]).ranked_results == (
+        fractional_minute_later,
+        exact_minute,
+    )
