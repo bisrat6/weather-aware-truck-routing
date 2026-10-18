@@ -7,6 +7,7 @@ import pytest
 
 from analysis import RouteResult, RouteSummary, analyze_route, rank_routes
 from risk import RiskLevel
+from routing.checkpoints import sample_checkpoints
 from routing.mapbox import parse_routes
 from weather.models import MissingWeather, WeatherSample
 
@@ -56,6 +57,24 @@ def test_checkpoint_miles_sum_and_summary_matches_classified_checkpoints():
     )
     assert all(cp.risk_level == RiskLevel.SEVERE for cp in scored.checkpoints)
     assert scored.summary.eta_method == route.eta_method
+
+
+def test_summary_matches_each_mixed_risk_bucket():
+    route = parse_routes(json.loads((FIXTURES / "mapbox_slc_provo.json").read_text()))[0]
+    n = len(sample_checkpoints(route, 5))
+    winds = (10.0, 30.0, 40.0, 50.0, 70.0)
+    samples = [
+        WeatherSample(datetime(2026, 10, 17, tzinfo=UTC), winds[index % len(winds)], 0.0, 0.0)
+        for index in range(n)
+    ]
+    scored = analyze_route(
+        route, datetime(2026, 10, 17, tzinfo=UTC), 5, 0, StubWeather(samples)
+    )
+    assert {checkpoint.risk_level for checkpoint in scored.checkpoints} == set(RiskLevel)
+    for level in RiskLevel:
+        assert scored.summary.miles_by_level[level] == pytest.approx(
+            math.fsum(cp.owned_mi for cp in scored.checkpoints if cp.risk_level == level)
+        )
 
 
 def test_load_changes_risk_only_via_shared_engine():
