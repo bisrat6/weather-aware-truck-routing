@@ -244,6 +244,47 @@ def test_no_driving_route_returns_sanitized_422(client, monkeypatch, payload):
     assert "api.mapbox.com" not in response.content.decode()
 
 
+@pytest.mark.parametrize(
+    ("upstream_message", "expected_code", "expected_message"),
+    [
+        (
+            f"Route exceeds maximum distance limitation. {TOKEN} "
+            "https://api.mapbox.com/directions?access_token=private",
+            "route_too_far",
+            "These places are too far apart for a driving route.",
+        ),
+        (
+            f"Unsupported driving profile. provider-private-detail {TOKEN} "
+            "https://api.mapbox.com/directions?access_token=private",
+            "route_not_supported",
+            "A driving route could not be built between these places.",
+        ),
+    ],
+    ids=["maximum-distance", "other-invalid-input"],
+)
+def test_mapbox_invalid_input_422_is_mapped_and_sanitized(
+    client, monkeypatch, upstream_message, expected_code, expected_message
+):
+    monkeypatch.setattr(
+        "requests.get",
+        lambda *args, **kwargs: FakeResponse(
+            422, {"code": "InvalidInput", "message": upstream_message}
+        ),
+    )
+
+    response = client.post("/api/analyze", body(), format="json")
+
+    response_body = response.content.decode()
+    assert response.status_code == 422
+    assert response.json() == {
+        "error": {"code": expected_code, "message": expected_message}
+    }
+    assert upstream_message not in response_body
+    assert "provider-private-detail" not in response_body
+    assert TOKEN not in response_body
+    assert "api.mapbox.com" not in response_body
+
+
 def test_routing_rate_limit_has_retry_hint_and_no_credentials(client, monkeypatch):
     monkeypatch.setattr(
         "requests.get",

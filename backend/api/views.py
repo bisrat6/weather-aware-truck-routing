@@ -70,7 +70,19 @@ def analyze(request: Request) -> Response:
             "No driving route found between these places.",
             422,
         ) from None
-    except MapboxError:
+    except MapboxError as exc:
+        if exc.status_code == 422 and exc.code == "InvalidInput":
+            if "maximum distance" in str(exc).casefold():
+                raise APIError(
+                    "route_too_far",
+                    "These places are too far apart for a driving route.",
+                    422,
+                ) from None
+            raise APIError(
+                "route_not_supported",
+                "A driving route could not be built between these places.",
+                422,
+            ) from None
         raise APIError("routing_unavailable", "Route service is unavailable.", 502) from None
 
     try:

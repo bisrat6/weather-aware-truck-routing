@@ -106,10 +106,15 @@ Validation errors return HTTP 400. A Mapbox Directions response indicating no dr
 (`NoRoute` or `NoSegment`, including an HTTP 200 response with a no-route code or a successful
 response with no routes) returns HTTP 422 with code `no_route_found` and message
 `No driving route found between these places.` Other invalid, unavailable, or expired Mapbox
-route requests return HTTP 502. Weather service failures return HTTP 502; rate limits return
-HTTP 429 and include a retry hint if one is supplied. Missing weather at individual
-checkpoints remains in the successful response as `weather_missing: true`. An unset
-`MAPBOX_TOKEN` returns HTTP 503 with a configuration error.
+route requests return HTTP 502, except Mapbox HTTP 422 responses with code `InvalidInput`.
+Those return HTTP 422 with code `route_too_far` and message
+`These places are too far apart for a driving route.` when the provider message mentions
+"maximum distance"; other `InvalidInput` responses return HTTP 422 with code
+`route_not_supported` and message `A driving route could not be built between these places.`
+Provider message text is never returned to the client. Weather service failures return HTTP
+502; rate limits return HTTP 429 and include a retry hint if one is supplied. Missing weather
+at individual checkpoints remains in the successful response as `weather_missing: true`. An
+unset `MAPBOX_TOKEN` returns HTTP 503 with a configuration error.
 
 ## `GET /api/geocode?q=`
 
