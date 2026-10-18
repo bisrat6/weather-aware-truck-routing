@@ -1,4 +1,4 @@
-import type { AnalyzeRequest, AnalyzeResponse, GeocodeResponse } from "./types";
+import type { AnalyzeRequest, AnalyzeResponse, GeocodeResponse, HeatmapRequest, HeatmapResponse } from "./types";
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000").replace(
   /\/$/,
@@ -24,6 +24,7 @@ async function request<T>(
   path: string,
   init?: RequestInit,
   externalSignal?: AbortSignal,
+  onResponseBody?: (bodyText: string) => void,
 ): Promise<T> {
   const controller = new AbortController();
   const abortRequest = () => controller.abort();
@@ -37,6 +38,7 @@ async function request<T>(
       headers: { Accept: "application/json", ...init?.headers },
     });
     const bodyText = await response.text();
+    onResponseBody?.(bodyText);
     let body: unknown;
     try {
       body = bodyText ? JSON.parse(bodyText) : null;
@@ -71,6 +73,18 @@ export function analyze(requestBody: AnalyzeRequest): Promise<AnalyzeResponse> {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(requestBody),
   });
+}
+
+export function heatmap(
+  requestBody: HeatmapRequest,
+  signal?: AbortSignal,
+  onResponseBody?: (bodyText: string) => void,
+): Promise<HeatmapResponse> {
+  return request<HeatmapResponse>("/api/heatmap", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(requestBody),
+  }, signal, onResponseBody);
 }
 
 export function geocode(query: string, signal?: AbortSignal): Promise<GeocodeResponse> {

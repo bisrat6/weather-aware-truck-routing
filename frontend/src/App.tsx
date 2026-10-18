@@ -1,4 +1,4 @@
-import { useEffect, useState, type CSSProperties, type FormEvent, type KeyboardEvent } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent } from "react";
 import {
   CalendarClock,
   ChevronDown,
@@ -10,15 +10,103 @@ import {
   Route as RouteIcon,
   Weight,
 } from "lucide-react";
-import { analyze } from "./api";
+import { analyze, heatmap } from "./api";
 import { PlacePicker, type Place } from "./PlacePicker";
 import { RouteMap } from "./RouteMap";
 import { RISK_LEVELS, riskColorToken, type RiskLabel } from "./constants";
-import type { AnalyzeResponse, AnalyzedRoute, Checkpoint, RiskLevel } from "./types";
+import type { AnalyzeResponse, AnalyzedRoute, Checkpoint, HeatmapResponse, RiskLevel } from "./types";
 import "./App.css";
 
 type IntervalMiles = 10 | 25 | 50;
 type ResultsTab = "routes" | "checkpoints";
+type HeatmapContext = { departureUtc: string; loadLb: number };
+type CachedHeatmap = { response: HeatmapResponse; requestBytes: number; responseBytes: number };
+
+const OPEN_METEO_URL = "https://open-meteo.com/";
+
+function localTimezoneLabel(value: string): string {
+  const date = new Date(value);
+  const offset = -date.getTimezoneOffset();
+  const sign = offset >= 0 ? "+" : "-";
+  const hours = String(Math.floor(Math.abs(offset) / 60)).padStart(2, "0");
+  const minutes = String(Math.abs(offset) % 60).padStart(2, "0");
+  const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  return `${timezone} (UTC${sign}${hours}:${minutes})`;
+}
+
+function localHeatmapTime(value: string): string {
+  return new Date(value).toLocaleString(undefined, {
+    weekday: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+}
+
+function HeatmapPanel({
+  response,
+  routeIndex,
+  loading,
+  unavailable,
+  hour,
+  onHourChange,
+  enabled,
+  onEnabledChange,
+}: {
+  response: HeatmapResponse | null;
+  routeIndex: number | null;
+  loading: boolean;
+  unavailable: boolean;
+  hour: number;
+  onHourChange: (hour: number) => void;
+  enabled: boolean;
+  onEnabledChange: (enabled: boolean) => void;
+}) {
+  const hourValue = response?.hours[hour] ?? response?.hours[0] ?? "";
+  const timeLabel = hourValue ? localHeatmapTime(hourValue) : "Choose a route to load forecast hours";
+  const timezone = hourValue ? localTimezoneLabel(hourValue) : Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+  return (
+    <section className="panel-section heatmap-section" aria-labelledby="heatmap-title">
+      <div className="section-title-row">
+        <h2 id="heatmap-title" className="section-title">
+          {routeIndex === null ? "Weather forecast" : `Forecast along Route ${routeIndex + 1}`}
+        </h2>
+        <label className="heatmap-toggle">
+          <input type="checkbox" checked={enabled} onChange={(event) => onEnabledChange(event.target.checked)} />
+          <span>Show</span>
+        </label>
+      </div>
+      <label className="field-label" htmlFor="forecast-hour">Forecast hour · {timezone}</label>
+      <output className="heatmap-time" htmlFor="forecast-hour">{timeLabel}</output>
+      <input
+        id="forecast-hour"
+        className="heatmap-slider"
+        type="range"
+        min={0}
+        max={Math.max(0, (response?.hours.length ?? 49) - 1)}
+        step={1}
+        value={hour}
+        disabled={!response}
+        aria-valuetext={hourValue ? `${timeLabel}, ${timezone}` : timeLabel}
+        onChange={(event) => onHourChange(Number(event.target.value))}
+      />
+      {loading && <p className="heatmap-status" role="status">Loading forecast…</p>}
+      {unavailable && <p className="heatmap-unavailable" role="status">Forecast overlay unavailable for this route</p>}
+      <div className="heatmap-legend" aria-label="Heatmap risk legend">
+        {RISK_LEVELS.filter(({ label }) => label !== "No data").map(({ label, marker }) => (
+          <span className="heatmap-legend__item" key={label} style={riskStyle(label)}>
+            <i aria-hidden="true">{marker}</i>{label}
+          </span>
+        ))}
+        <span className="heatmap-legend__item" style={riskStyle("No data")}>
+          <i aria-hidden="true">?</i>No forecast data
+        </span>
+      </div>
+      <p className="heatmap-credit">Weather data by <a href={OPEN_METEO_URL} target="_blank" rel="noreferrer">Open-Meteo</a></p>
+    </section>
+  );
+}
 
 function defaultDeparture(): string {
   const date = new Date(Date.now() + 2 * 60 * 60 * 1000);
@@ -244,6 +332,8 @@ function CheckpointList({ checkpoints }: { checkpoints: Checkpoint[] }) {
 }
 
 export default function App() {
+  const heatmapController = useRef<AbortController | null>(null);
+  const heatmapCache = useRef(new Map<number, CachedHeatmap>());
   const [origin, setOrigin] = useState<Place | null>(null);
   const [destination, setDestination] = useState<Place | null>(null);
   const [departure, setDeparture] = useState(defaultDeparture);
@@ -256,6 +346,15 @@ export default function App() {
   const [waking, setWaking] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState(false);
+  const [heatmapContext, setHeatmapContext] = useState<HeatmapContext | null>(null);
+  const [heatmapResponse, setHeatmapResponse] = useState<HeatmapResponse | null>(null);
+  const [heatmapLoading, setHeatmapLoading] = useState(false);
+  const [heatmapUnavailable, setHeatmapUnavailable] = useState(false);
+  const [heatmapHour, setHeatmapHour] = useState(0);
+  const [heatmapEnabled, setHeatmapEnabled] = useState(true);
+  const [heatmapRequestedAt, setHeatmapRequestedAt] = useState<number | null>(null);
+  const [heatmapRequestBytes, setHeatmapRequestBytes] = useState<number | null>(null);
+  const [heatmapResponseBytes, setHeatmapResponseBytes] = useState<number | null>(null);
 
   useEffect(() => {
     if (!loading) return;
@@ -263,24 +362,93 @@ export default function App() {
     return () => window.clearTimeout(timer);
   }, [loading]);
 
+  const activeRoute = data?.routes.find((route) => route.route_index === selectedRoute)
+    ?? data?.routes.find((route) => route.route_index === data.recommended)
+    ?? null;
+
+  useEffect(() => {
+    if (!activeRoute || !heatmapContext) return;
+    const cached = heatmapCache.current.get(activeRoute.route_index);
+    if (cached) {
+      setHeatmapResponse(cached.response);
+      setHeatmapRequestBytes(cached.requestBytes);
+      setHeatmapResponseBytes(cached.responseBytes);
+      setHeatmapRequestedAt(null);
+      setHeatmapLoading(false);
+      setHeatmapUnavailable(false);
+      setHeatmapHour(0);
+      return;
+    }
+
+    const controller = new AbortController();
+    heatmapController.current = controller;
+    const requestedAt = performance.now();
+    const requestBody = {
+      geometry: activeRoute.geometry,
+      departure_utc: heatmapContext.departureUtc,
+      load_lb: heatmapContext.loadLb,
+    };
+    const requestBytes = new TextEncoder().encode(JSON.stringify(requestBody)).length;
+    setHeatmapRequestedAt(requestedAt);
+    setHeatmapRequestBytes(requestBytes);
+    setHeatmapResponseBytes(null);
+    setHeatmapResponse(null);
+    setHeatmapLoading(true);
+    setHeatmapUnavailable(false);
+    setHeatmapHour(0);
+
+    let responseBytes = 0;
+    void heatmap(requestBody, controller.signal, (bodyText) => {
+      responseBytes = new TextEncoder().encode(bodyText).length;
+    }).then((response) => {
+      if (controller.signal.aborted) return;
+      heatmapCache.current.set(activeRoute.route_index, { response, requestBytes, responseBytes });
+      setHeatmapResponse(response);
+      setHeatmapResponseBytes(responseBytes);
+      setHeatmapLoading(false);
+    }).catch(() => {
+      if (controller.signal.aborted) return;
+      setHeatmapUnavailable(true);
+      setHeatmapLoading(false);
+    });
+
+    return () => {
+      controller.abort();
+      if (heatmapController.current === controller) heatmapController.current = null;
+    };
+  }, [activeRoute, heatmapContext]);
+
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!origin || !destination) return;
+    heatmapController.current?.abort();
+    heatmapController.current = null;
+    setHeatmapContext(null);
+    setHeatmapResponse(null);
+    setHeatmapLoading(false);
+    setHeatmapUnavailable(false);
+    setHeatmapRequestedAt(null);
+    setHeatmapRequestBytes(null);
+    setHeatmapResponseBytes(null);
+    heatmapCache.current.clear();
+    setHeatmapHour(0);
     setLoading(true);
     setWaking(false);
     setError(null);
     setData(null);
     try {
+      const departureUtc = new Date(departure).toISOString();
       const result = await analyze({
         origin: { lat: origin.lat, lon: origin.lon },
         destination: { lat: destination.lat, lon: destination.lon },
-        departure_utc: new Date(departure).toISOString(),
+        departure_utc: departureUtc,
         load_lb: Number(loadLb),
         interval_miles: intervalMiles,
       });
       setData(result);
       setSelectedRoute(result.recommended);
       setTab("routes");
+      setHeatmapContext({ departureUtc, loadLb: Number(loadLb) });
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "The request failed.");
     } finally {
@@ -288,10 +456,6 @@ export default function App() {
       setWaking(false);
     }
   }
-
-  const activeRoute = data?.routes.find((route) => route.route_index === selectedRoute)
-    ?? data?.routes.find((route) => route.route_index === data.recommended)
-    ?? null;
 
   const routes = data ? rankedRoutes(data) : [];
 
@@ -306,7 +470,17 @@ export default function App() {
   return (
     <main className="workspace">
       <section className="map-stage" aria-label="Route map">
-        <RouteMap routes={data?.routes ?? []} recommended={data?.recommended ?? null} selectedRoute={activeRoute} />
+        <RouteMap
+          routes={data?.routes ?? []}
+          recommended={data?.recommended ?? null}
+          selectedRoute={activeRoute}
+          heatmapResponse={heatmapResponse}
+          heatmapHour={heatmapHour}
+          heatmapEnabled={heatmapEnabled}
+          heatmapRequestedAt={heatmapRequestedAt}
+          heatmapRequestBytes={heatmapRequestBytes}
+          heatmapResponseBytes={heatmapResponseBytes}
+        />
         <div className="risk-legend" aria-label="Risk level legend">
           <span className="risk-legend__title">Checkpoint risk</span>
           {RISK_LEVELS.map(({ label, marker }) => (
@@ -406,6 +580,16 @@ export default function App() {
               </div>
             )}
           </section>
+          <HeatmapPanel
+            response={heatmapResponse}
+            routeIndex={activeRoute?.route_index ?? null}
+            loading={heatmapLoading}
+            unavailable={heatmapUnavailable}
+            hour={heatmapHour}
+            onHourChange={setHeatmapHour}
+            enabled={heatmapEnabled}
+            onEnabledChange={setHeatmapEnabled}
+          />
         </div>
       </aside>
     </main>

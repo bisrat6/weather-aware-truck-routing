@@ -80,3 +80,20 @@ export interface AnalyzeRequest {
   load_lb: number;
   interval_miles?: 10 | 25 | 50;
 }
+
+export interface HeatmapRequest {
+  geometry: GeoJSONLine;
+  departure_utc: string;
+  load_lb: number;
+}
+
+export interface HeatmapPoint {
+  lat: number;
+  lon: number;
+  risk: (0 | 1 | 2 | 3 | 4 | null)[];
+}
+
+export interface HeatmapResponse {
+  hours: string[];
+  points: HeatmapPoint[];
+}
