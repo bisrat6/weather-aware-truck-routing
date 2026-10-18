@@ -34,6 +34,18 @@ function routeTitle(route: AnalyzedRoute): string {
   return `Route ${route.route_index + 1}`;
 }
 
+function BrandMark() {
+  return (
+    <svg className="brand-mark" viewBox="0 0 40 40" aria-hidden="true">
+      <circle className="brand-mark__ground" cx="20" cy="20" r="20" />
+      <path className="brand-mark__road" d="M11 29c6-1 3-7 9-8s3-8 9-10" />
+      <circle className="brand-mark__point" cx="11" cy="29" r="3" />
+      <circle className="brand-mark__point" cx="29" cy="11" r="3" />
+      <circle className="brand-mark__weather" cx="27" cy="29" r="3" />
+    </svg>
+  );
+}
+
 function rankedRoutes(data: AnalyzeResponse): AnalyzedRoute[] {
   return data.ranking.flatMap((index) => {
     const route = data.routes.find((candidate) => candidate.route_index === index);
@@ -125,6 +137,7 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [waking, setWaking] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [pickerVersion, setPickerVersion] = useState(0);
 
   useEffect(() => {
     if (!loading) return;
@@ -161,22 +174,38 @@ export default function App() {
     ?? data?.routes.find((route) => route.route_index === data.recommended)
     ?? null;
 
+  function resetTrip() {
+    setOrigin(null);
+    setDestination(null);
+    setData(null);
+    setSelectedRoute(null);
+    setError(null);
+    setLoadLb("0");
+    setDeparture(defaultDeparture());
+    setPickerVersion((version) => version + 1);
+  }
+
   return (
     <main className="workspace">
       <aside className="trip-panel" aria-label="Trip planning and route results">
+        <div className="brand-row">
+          <BrandMark />
+          <span className="brand-row__name">Road weather</span>
+          <span className="brand-row__caption">TRIP DESK</span>
+        </div>
         <header className="panel-header">
-          <p className="eyebrow">Road weather · Route planning</p>
-          <h1>Trip conditions</h1>
-          <p className="panel-header__lede">Compare road risk before the wheels roll.</p>
+          <h1>Plan a trip</h1>
+          <p className="panel-header__lede">Check conditions along the way.</p>
         </header>
 
         <form className="trip-form" onSubmit={submit}>
           <div className="section-heading">
-            <h2>Plan a trip</h2>
-            <span>01 / 02</span>
+            <h2>Trip details</h2>
+            <span>Origin to destination</span>
           </div>
-          <PlacePicker id="origin" label="Origin" value={origin} onChange={setOrigin} />
+          <PlacePicker key={`origin-${pickerVersion}`} id="origin" label="Origin" value={origin} onChange={setOrigin} />
           <PlacePicker
+            key={`destination-${pickerVersion}`}
             id="destination"
             label="Destination"
             value={destination}
@@ -230,8 +259,7 @@ export default function App() {
           <section className="results-section" aria-labelledby="results-title">
             <div className="section-heading results-heading">
               <div>
-                <p className="eyebrow">02 / 02 · Options</p>
-                <h2 id="results-title">Route comparison</h2>
+                <h2 id="results-title">Routes</h2>
               </div>
               <span className="route-count">{data.routes.length} routes</span>
             </div>
@@ -263,8 +291,8 @@ export default function App() {
         ) : !loading && !error ? (
           <div className="empty-state empty-state--initial">
             <span className="empty-state__index">READY WHEN YOU ARE</span>
-            <h2>Your route, with weather in view.</h2>
-            <p>Choose a place from each search list to compare forecast risk along the drive.</p>
+            <h2>Plan with the forecast in view.</h2>
+            <p>Choose an origin and destination to compare conditions along the drive.</p>
           </div>
         ) : null}
       </aside>
@@ -273,6 +301,16 @@ export default function App() {
         <div className="map-heading">
           <span className="map-heading__status" />
           <span>{activeRoute ? `${routeTitle(activeRoute)} · ${getRiskLabel(activeRoute.summary.max_level)} conditions` : "Route overview"}</span>
+        </div>
+        <div className="account-chip" aria-label="Local trip workspace">
+          <span className="account-chip__avatar" aria-hidden="true">R</span>
+          <span className="account-chip__identity">
+            <strong>Route planner</strong>
+            <small>Local workspace</small>
+          </span>
+          <button type="button" className="account-chip__reset" onClick={resetTrip} disabled={loading}>
+            Reset
+          </button>
         </div>
         <RouteMap
           routes={data?.routes ?? []}
