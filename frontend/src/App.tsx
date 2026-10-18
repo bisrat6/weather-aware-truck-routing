@@ -50,7 +50,10 @@ export default function App() {
       });
       setData(result);
     } catch (cause) {
-      if (cause instanceof ApiClientError && cause.code === "no_route_found") {
+      if (
+        cause instanceof ApiClientError &&
+        ["no_route_found", "route_too_far", "route_not_supported"].includes(cause.code ?? "")
+      ) {
         setError(cause.message || "No driving route found between these places.");
       } else {
         setError(cause instanceof Error ? cause.message : "The request failed.");
