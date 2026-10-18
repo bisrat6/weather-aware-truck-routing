@@ -40,6 +40,17 @@ class RouteSummary:
     unstable_checkpoints: int = 0
     unknown_stability_checkpoints: int = 0
 
+    @property
+    def blocked(self) -> bool:
+        """True if any assessed checkpoint is No Travel. Derived from checkpoint levels, not
+        from miles, so a route whose No Travel checkpoint owns 0 miles is still blocked."""
+        return self.max_level == RiskLevel.NO_TRAVEL
+
+    @property
+    def incomplete(self) -> bool:
+        """True if weather is missing at one or more checkpoints."""
+        return self.missing_weather_count > 0
+
 
 @dataclass(frozen=True)
 class RouteResult:

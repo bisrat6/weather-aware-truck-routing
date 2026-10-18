@@ -133,7 +133,7 @@ def analyze_route(
 def _risk_rank_key(result: RouteResult) -> tuple[bool, float, int, int, float, float]:
     summary = result.summary
     no_travel_mi = summary.miles_by_level[RiskLevel.NO_TRAVEL]
-    blocked = no_travel_mi > 0
+    blocked = summary.blocked
     return (
         blocked,
         no_travel_mi if blocked else 0.0,

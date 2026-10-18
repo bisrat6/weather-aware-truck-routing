@@ -28,9 +28,10 @@ class StubWeather:
 def result(label, miles, avg=1.0, duration=1000, missing_count=0, missing_miles=0.0):
     by_level = {level: 0.0 for level in RiskLevel}
     by_level.update(miles)
+    max_level = max((level for level, value in by_level.items() if value > 0), default=None)
     summary = RouteSummary(
         by_level,
-        max(miles, key=miles.get),
+        max_level,
         avg,
         duration,
         "annotations",
