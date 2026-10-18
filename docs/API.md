@@ -102,11 +102,14 @@ No Travel checkpoint or has missing weather data; the latter gives missing miles
 checkpoint count. `recommendation_reason` names the criterion that decided the ranking
 and includes the rounded duration difference when it is nonzero.
 
-Validation errors return HTTP 400. Invalid, unavailable, or expired Mapbox route requests
-return HTTP 502. Weather service failures return HTTP 502; rate limits return HTTP 429 and
-include a retry hint if one is supplied. Missing weather at individual checkpoints remains
-in the successful response as `weather_missing: true`. An unset `MAPBOX_TOKEN` returns HTTP
-503 with a configuration error.
+Validation errors return HTTP 400. A Mapbox Directions response indicating no driving route
+(`NoRoute` or `NoSegment`, including an HTTP 200 response with a no-route code or a successful
+response with no routes) returns HTTP 422 with code `no_route_found` and message
+`No driving route found between these places.` Other invalid, unavailable, or expired Mapbox
+route requests return HTTP 502. Weather service failures return HTTP 502; rate limits return
+HTTP 429 and include a retry hint if one is supplied. Missing weather at individual
+checkpoints remains in the successful response as `weather_missing: true`. An unset
+`MAPBOX_TOKEN` returns HTTP 503 with a configuration error.
 
 ## `GET /api/geocode?q=`
 

@@ -217,6 +217,33 @@ def test_routing_down_returns_safe_502(client, monkeypatch):
     assert "api.mapbox.com" not in response.content.decode()
 
 
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {
+            "code": "NoRoute",
+            "message": f"No route {TOKEN} https://api.mapbox.com/directions?access_token={TOKEN}",
+        },
+        {"code": "Ok", "routes": []},
+    ],
+    ids=["no-route-code", "empty-routes"],
+)
+def test_no_driving_route_returns_sanitized_422(client, monkeypatch, payload):
+    monkeypatch.setattr("requests.get", lambda *args, **kwargs: FakeResponse(200, payload))
+
+    response = client.post("/api/analyze", body(), format="json")
+
+    assert response.status_code == 422
+    assert response.json() == {
+        "error": {
+            "code": "no_route_found",
+            "message": "No driving route found between these places.",
+        }
+    }
+    assert TOKEN not in response.content.decode()
+    assert "api.mapbox.com" not in response.content.decode()
+
+
 def test_routing_rate_limit_has_retry_hint_and_no_credentials(client, monkeypatch):
     monkeypatch.setattr(
         "requests.get",

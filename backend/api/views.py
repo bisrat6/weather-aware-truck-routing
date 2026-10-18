@@ -27,7 +27,7 @@ from api.validation import (
     HeatmapRequestSerializer,
     validate_geocode_query,
 )
-from routing.errors import MapboxError, MapboxRateLimitError
+from routing.errors import MapboxError, MapboxNoRouteError, MapboxRateLimitError
 from routing.mapbox import get_routes
 from weather.errors import WeatherError, WeatherRateLimitError
 from weather.service import WeatherService
@@ -63,6 +63,12 @@ def analyze(request: Request) -> Response:
     except MapboxRateLimitError as exc:
         raise APIError(
             "rate_limited", "Route service rate limit exceeded." + _retry_hint(exc.retry_after), 429
+        ) from None
+    except MapboxNoRouteError:
+        raise APIError(
+            "no_route_found",
+            "No driving route found between these places.",
+            422,
         ) from None
     except MapboxError:
         raise APIError("routing_unavailable", "Route service is unavailable.", 502) from None
