@@ -87,6 +87,20 @@ def test_heatmap_shape_and_hour_zero_is_departure_hour(client, monkeypatch):
     assert all(value in range(5) or value is None for p in data["points"] for value in p["risk"])
 
 
+@pytest.mark.parametrize(("minute", "expected_hour"), [(30, "13"), (31, "13")])
+def test_heatmap_hour_zero_uses_nearest_hour_at_and_after_half_hour(
+    client, monkeypatch, minute, expected_hour
+):
+    mock_weather(monkeypatch)
+    response = client.post(
+        "/api/heatmap",
+        request_body(departure_utc=f"2026-10-17T12:{minute:02}:00Z"),
+        format="json",
+    )
+    assert response.status_code == 200
+    assert response.json()["hours"][0] == f"2026-10-17T{expected_hour}:00:00Z"
+
+
 def test_heatmap_load_changes_risk_through_shared_engine(client, monkeypatch):
     mock_weather(monkeypatch, wind=40)
     light = client.post("/api/heatmap", request_body(load_lb=10_000), format="json").json()
