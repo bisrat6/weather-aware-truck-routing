@@ -14,14 +14,16 @@ import {
   getRiskColor,
   getThemeToken,
   MAP_INITIAL_VIEW,
-  RISK_LEVELS,
+  riskStyles,
   riskColorToken,
   type RiskLabel,
 } from "./constants";
 import type { AnalyzedRoute, Checkpoint, HeatmapResponse, RiskLevel } from "./types";
+import { registerRiskIcons, riskIconName, RiskIcon } from "./RiskIcon";
 
 const CHECKPOINT_SOURCE = "active-route-checkpoints";
 const CHECKPOINT_LAYER = "checkpoint-risk-markers";
+const CHECKPOINT_LOW_LAYER = "checkpoint-risk-low-markers";
 const ENDPOINT_SOURCE = "active-route-endpoints";
 const ORIGIN_LAYER = "active-route-origin";
 const DESTINATION_LAYER = "active-route-destination";
@@ -84,14 +86,10 @@ function riskLabel(level: RiskLevel | null): RiskLabel {
   return level ?? "No data";
 }
 
-function markerShape(label: RiskLabel): string {
-  return RISK_LEVELS.find((level) => level.label === label)!.marker;
-}
-
 function CheckpointRiskBadge({ level }: { level: RiskLabel }) {
   return (
     <span className="risk-badge" style={{ "--risk-color": `var(${riskColorToken(level)})` } as CSSProperties}>
-      <span className="risk-badge__symbol" aria-hidden="true">{markerShape(level)}</span>{level}
+      <RiskIcon level={level} className="risk-icon risk-badge__symbol" />{level}
     </span>
   );
 }
@@ -130,18 +128,27 @@ function routeRiskGradient(route: AnalyzedRoute): ExpressionSpecification {
   return expression as unknown as ExpressionSpecification;
 }
 
-function checkpointCollection(route: AnalyzedRoute | null): FeatureCollection<Point> {
+const DEMO_MARKER_LEVELS = Object.keys(riskStyles) as RiskLabel[];
+
+function levelDemoEnabled(): boolean {
+  return import.meta.env.DEV && new URLSearchParams(window.location.search).get("demo") === "levels";
+}
+
+function checkpointCollection(route: AnalyzedRoute | null, demoLevels = false): FeatureCollection<Point> {
   return {
     type: "FeatureCollection",
-    features: (route?.checkpoints ?? []).map((checkpoint) => {
-      const level = riskLabel(checkpoint.risk_level);
+    features: (route?.checkpoints ?? []).map((checkpoint, index) => {
+      const level = demoLevels
+        ? DEMO_MARKER_LEVELS[index % DEMO_MARKER_LEVELS.length]
+        : riskLabel(checkpoint.risk_level);
       return {
         type: "Feature" as const,
         id: checkpoint.index,
         properties: {
           checkpoint_index: checkpoint.index,
           risk_label: level,
-          marker_color: getRiskColor(level),
+          marker_image: riskIconName(level),
+          demo_marker: demoLevels,
         },
         geometry: { type: "Point" as const, coordinates: [checkpoint.lon, checkpoint.lat] },
       };
@@ -247,6 +254,7 @@ export function RouteMap({
   const heatmapMeasureId = useRef(0);
   const perfLoggedResponses = useRef(new WeakSet<HeatmapResponse>());
   const [loaded, setLoaded] = useState(false);
+  const [styleRevision, setStyleRevision] = useState(0);
   const [popupCheckpoint, setPopupCheckpoint] = useState<Checkpoint | null>(null);
   const [perfSliderMs, setPerfSliderMs] = useState<number | null>(null);
   const [perfFirstRenderMs, setPerfFirstRenderMs] = useState<number | null>(null);
@@ -263,6 +271,18 @@ export function RouteMap({
   useEffect(() => {
     const map = mapRef.current?.getMap();
     if (!loaded || !map) return;
+    const onStyleLoad = () => {
+      registerRiskIcons(map);
+      setStyleRevision((revision) => revision + 1);
+    };
+    map.on("style.load", onStyleLoad);
+    return () => { map.off("style.load", onStyleLoad); };
+  }, [loaded]);
+
+  useEffect(() => {
+    const map = mapRef.current?.getMap();
+    if (!loaded || !map) return;
+    registerRiskIcons(map);
 
     const routeIds = new Set(routes.map((route) => String(route.route_index)));
     for (const route of routes) {
@@ -322,13 +342,30 @@ export function RouteMap({
     if (!map.getLayer(CHECKPOINT_LAYER)) {
       map.addLayer({
         id: CHECKPOINT_LAYER,
-        type: "circle",
+        type: "symbol",
         source: CHECKPOINT_SOURCE,
-        paint: {
-          "circle-radius": 6,
-          "circle-color": ["get", "marker_color"],
-          "circle-stroke-color": getThemeToken("--surface"),
-          "circle-stroke-width": 2,
+        minzoom: 4,
+        filter: ["any", ["!=", ["get", "risk_label"], "Low"], ["==", ["get", "demo_marker"], true]],
+        layout: {
+          "icon-image": ["get", "marker_image"],
+          "icon-size": ["match", ["get", "risk_label"], "Low", 0.42, 0.65],
+          "icon-allow-overlap": true,
+          "icon-ignore-placement": true,
+        },
+      });
+    }
+    if (!map.getLayer(CHECKPOINT_LOW_LAYER)) {
+      map.addLayer({
+        id: CHECKPOINT_LOW_LAYER,
+        type: "symbol",
+        source: CHECKPOINT_SOURCE,
+        minzoom: 6,
+        filter: ["all", ["==", ["get", "risk_label"], "Low"], ["!=", ["get", "demo_marker"], true]],
+        layout: {
+          "icon-image": ["get", "marker_image"],
+          "icon-size": 0.42,
+          "icon-allow-overlap": true,
+          "icon-ignore-placement": true,
         },
       });
     }
@@ -361,6 +398,7 @@ export function RouteMap({
       });
     }
     map.moveLayer(CHECKPOINT_LAYER);
+    map.moveLayer(CHECKPOINT_LOW_LAYER);
     map.moveLayer(ORIGIN_LAYER);
     map.moveLayer(DESTINATION_LAYER);
 
@@ -389,7 +427,7 @@ export function RouteMap({
         },
       );
     }
-  }, [loaded, routes]);
+  }, [loaded, routes, styleRevision]);
 
   useEffect(() => {
     const map = mapRef.current?.getMap();
@@ -503,7 +541,7 @@ export function RouteMap({
     for (const layerId of [HEATMAP_LAYER, HEATMAP_RIBBON_LAYER, HEATMAP_CIRCLE_LAYER, HEATMAP_LOW_CIRCLE_LAYER, HEATMAP_MISSING_LAYER]) {
       map.setLayoutProperty(layerId, "visibility", heatmapEnabled ? "visible" : "none");
     }
-  }, [loaded, heatmapData, heatmapEnabled]);
+  }, [loaded, heatmapData, heatmapEnabled, styleRevision]);
 
   useEffect(() => {
     const map = mapRef.current?.getMap();
@@ -538,7 +576,7 @@ export function RouteMap({
       }
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [loaded, heatmapData, heatmapHour, perfEnabled]);
+  }, [loaded, heatmapData, heatmapHour, perfEnabled, styleRevision]);
 
   useEffect(() => {
     const map = mapRef.current?.getMap();
@@ -584,16 +622,16 @@ export function RouteMap({
       map.moveLayer(lineId, CHECKPOINT_LAYER);
       map.moveLayer(haloId, lineId);
     }
-  }, [loaded, recommended, routes, selectedRoute]);
+  }, [loaded, recommended, routes, selectedRoute, styleRevision]);
 
   useEffect(() => {
     const map = mapRef.current?.getMap();
     if (!loaded || !map) return;
     const source = map.getSource(CHECKPOINT_SOURCE);
-    if (source instanceof GeoJSONSource) source.setData(checkpointCollection(selectedRoute));
+    if (source instanceof GeoJSONSource) source.setData(checkpointCollection(selectedRoute, levelDemoEnabled()));
     const endpointSource = map.getSource(ENDPOINT_SOURCE);
     if (endpointSource instanceof GeoJSONSource) endpointSource.setData(endpointCollection(selectedRoute));
-  }, [loaded, selectedRoute]);
+  }, [loaded, selectedRoute, styleRevision]);
 
   const handleMapClick = useCallback(
     (event: MapLayerMouseEvent) => {
@@ -613,7 +651,7 @@ export function RouteMap({
         initialViewState={MAP_INITIAL_VIEW}
         mapStyle={BASEMAP_STYLE}
         attributionControl={{ compact: false, customAttribution: "Weather data: Open-Meteo" }}
-        interactiveLayerIds={[CHECKPOINT_LAYER]}
+        interactiveLayerIds={[CHECKPOINT_LAYER, CHECKPOINT_LOW_LAYER]}
         onClick={handleMapClick}
         onLoad={() => setLoaded(true)}
         style={{ width: "100%", height: "100%" }}

@@ -14,6 +14,7 @@ import { analyze, heatmap } from "./api";
 import { PlacePicker, type Place } from "./PlacePicker";
 import { RouteMap } from "./RouteMap";
 import { RISK_LEVELS, riskColorToken, type RiskLabel } from "./constants";
+import { RiskIcon } from "./RiskIcon";
 import type { AnalyzeResponse, AnalyzedRoute, Checkpoint, HeatmapResponse, RiskLevel } from "./types";
 import "./App.css";
 
@@ -178,10 +179,9 @@ function riskStyle(level: RiskLabel): CSSProperties {
 }
 
 function RiskBadge({ level }: { level: RiskLabel }) {
-  const marker = RISK_LEVELS.find((entry) => entry.label === level)?.marker ?? "?";
   return (
     <span className="risk-badge" style={riskStyle(level)}>
-      <span className="risk-badge__symbol" aria-hidden="true">{marker}</span>
+      <RiskIcon level={level} className="risk-icon risk-badge__symbol" />
       <span>{level}</span>
     </span>
   );
@@ -520,6 +520,7 @@ export default function App() {
   }
 
   const routes = data ? rankedRoutes(data) : [];
+  const levelsDemoEnabled = import.meta.env.DEV && new URLSearchParams(window.location.search).get("demo") === "levels";
 
   function handleTabKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
     if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
@@ -545,9 +546,12 @@ export default function App() {
         />
         <div className="risk-legend" aria-label="Risk level legend">
           <span className="risk-legend__title">Checkpoint risk</span>
-          {RISK_LEVELS.filter(({ label }) => label !== "No data" || heatmapEnabled).map(({ label, marker }) => (
+          {levelsDemoEnabled && (
+            <span className="heatmap-demo-badge">DEMO DATA</span>
+          )}
+          {RISK_LEVELS.filter(({ label }) => label !== "No data" || heatmapEnabled || levelsDemoEnabled).map(({ label }) => (
             <span className="risk-legend__item" key={label} style={riskStyle(label)}>
-              <i aria-hidden="true">{marker}</i>{label}
+              <RiskIcon level={label} className="risk-icon risk-legend__icon" />{label}
             </span>
           ))}
         </div>

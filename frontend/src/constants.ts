@@ -1,31 +1,25 @@
 import type { RiskLevel } from "./types";
 
 export type RiskLabel = RiskLevel | "No data";
+export type RiskShape = "circle" | "diamond" | "triangle" | "square" | "cross" | "missing";
 
-export const RISK_LEVELS: { label: RiskLabel; marker: string }[] = [
-  { label: "Low", marker: "○" },
-  { label: "Moderate", marker: "◇" },
-  { label: "High", marker: "△" },
-  { label: "Severe", marker: "■" },
-  { label: "No Travel", marker: "✕" },
-  { label: "No data", marker: "?" },
-];
-
-const RISK_TOKEN: Record<RiskLabel, string> = {
-  Low: "--risk-low",
-  Moderate: "--risk-moderate",
-  High: "--risk-high",
-  Severe: "--risk-severe",
-  "No Travel": "--risk-no-travel",
-  "No data": "--risk-no-data",
+export const riskStyles: Record<RiskLabel, { label: RiskLabel; color: string; shape: RiskShape }> = {
+  Low: { label: "Low", color: "--risk-low", shape: "circle" },
+  Moderate: { label: "Moderate", color: "--risk-moderate", shape: "diamond" },
+  High: { label: "High", color: "--risk-high", shape: "triangle" },
+  Severe: { label: "Severe", color: "--risk-severe", shape: "square" },
+  "No Travel": { label: "No Travel", color: "--risk-no-travel", shape: "cross" },
+  "No data": { label: "No data", color: "--risk-no-data", shape: "missing" },
 };
 
+export const RISK_LEVELS = Object.values(riskStyles);
+
 export function riskColorToken(level: RiskLabel): string {
-  return RISK_TOKEN[level];
+  return riskStyles[level].color;
 }
 
 export function getRiskColor(level: RiskLabel): string {
-  return getComputedStyle(document.documentElement).getPropertyValue(RISK_TOKEN[level]).trim();
+  return getComputedStyle(document.documentElement).getPropertyValue(riskStyles[level].color).trim();
 }
 
 export function getThemeToken(name: string): string {

@@ -93,7 +93,8 @@ button:focus-visible, input:focus-visible, summary:focus-visible, [role="radio"]
 .route-card__name { font-size: var(--font-14); font-weight: var(--weight-bold); }
 .recommended-pill { padding: var(--space-1) var(--space-2); color: var(--success-text); font-size: var(--font-12); font-weight: var(--weight-semibold); background: var(--success-bg); border-radius: var(--radius-pill); }
 .risk-badge { display: inline-flex; align-items: center; gap: var(--space-1); width: fit-content; padding: var(--space-1) var(--space-2); color: var(--risk-color); font-size: var(--font-12); font-weight: var(--weight-semibold); background: color-mix(in srgb, var(--risk-color) 10%, white); border-radius: var(--radius-pill); white-space: nowrap; }
-.risk-badge__symbol { font-size: var(--font-13); line-height: 1; }
+.risk-icon { display: inline-block; flex: 0 0 auto; width: 18px; height: 18px; vertical-align: middle; }
+.risk-badge__symbol { width: 16px; height: 16px; }
 .route-card__heading .risk-badge { margin-left: auto; }
 .route-card__provider { color: var(--link); font-size: var(--font-12); }
 .route-card__metrics { display: flex; align-items: center; gap: var(--space-3); color: var(--muted); font-size: var(--font-12); }
@@ -150,7 +151,7 @@ button:focus-visible, input:focus-visible, summary:focus-visible, [role="radio"]
 .risk-legend { position: absolute; z-index: 2; top: var(--space-4); right: var(--space-4); display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); max-width: min(560px, calc(100% - var(--space-8))); padding: var(--space-2) var(--space-3); background: var(--surface); border: 1px solid var(--divider); border-radius: var(--radius-control); box-shadow: var(--card-shadow); }
 .risk-legend__title { width: 100%; color: var(--muted); font-size: 10px; font-weight: var(--weight-semibold); text-transform: uppercase; letter-spacing: 0.06em; }
 .risk-legend__item { display: inline-flex; align-items: center; gap: var(--space-1); color: var(--risk-color); font-size: var(--font-12); font-weight: var(--weight-medium); white-space: nowrap; }
-.risk-legend__item i { font-style: normal; font-weight: var(--weight-bold); }
+.risk-legend__icon { width: 18px; height: 18px; }
 .panel-handle { display: none; }
 .maplibregl-ctrl-group { overflow: hidden; border: 1px solid var(--divider) !important; border-radius: var(--radius-control) !important; box-shadow: var(--card-shadow) !important; }
 .maplibregl-ctrl-group button { width: var(--touch-target) !important; height: var(--touch-target) !important; }
