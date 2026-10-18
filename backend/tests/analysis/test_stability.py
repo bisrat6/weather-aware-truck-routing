@@ -149,3 +149,84 @@ def test_last_available_forecast_hour_has_unknown_later_stability(monkeypatch):
     assert last.unstable is None
     assert scored.summary.unknown_stability_checkpoints >= 1
     assert len(calls) == 1
+
+
+# --- stability rule: True if any assessed shift differs; None only if no flip is known and a
+# --- shifted level is missing; False only if both shifted levels match.
+
+
+def _first_checkpoint(values):
+    route = recorded_route()
+    scored = analyze_route(route, NOW, 1000, 0, TripletWeather(values))
+    return scored, scored.checkpoints[0]
+
+
+def _triplets(n):
+    return [sample(20)] * (n * 3)  # every checkpoint LOW at -2h, base and +2h
+
+
+def test_known_flip_at_minus_2h_is_unstable_even_if_plus_2h_is_missing():
+    n = len(sample_checkpoints(recorded_route(), 1000))
+    values = _triplets(n)
+    values[0] = sample(40)  # -2h: HIGH, base is LOW -> a flip is already proven
+    values[2] = MissingWeather(None, "fixture missing")  # +2h unknown
+    scored, first = _first_checkpoint(values)
+    assert first.risk_level == RiskLevel.LOW
+    assert first.risk_level_minus_2h == RiskLevel.HIGH
+    assert first.risk_level_plus_2h is None
+    assert first.unstable is True
+    assert scored.summary.unstable_checkpoints == 1
+    assert scored.summary.unknown_stability_checkpoints == 0
+
+
+def test_known_flip_at_plus_2h_is_unstable_even_if_minus_2h_is_missing():
+    n = len(sample_checkpoints(recorded_route(), 1000))
+    values = _triplets(n)
+    values[0] = MissingWeather(None, "fixture missing")  # -2h unknown
+    values[2] = sample(40)  # +2h: HIGH, base is LOW
+    scored, first = _first_checkpoint(values)
+    assert first.risk_level_minus_2h is None
+    assert first.risk_level_plus_2h == RiskLevel.HIGH
+    assert first.unstable is True
+    assert scored.summary.unstable_checkpoints == 1
+    assert scored.summary.unknown_stability_checkpoints == 0
+
+
+@pytest.mark.parametrize("missing_slot", [0, 2])
+def test_no_known_flip_and_one_shift_missing_is_unknown(missing_slot):
+    n = len(sample_checkpoints(recorded_route(), 1000))
+    values = _triplets(n)
+    values[missing_slot] = MissingWeather(None, "fixture missing")
+    scored, first = _first_checkpoint(values)
+    assert first.unstable is None
+    assert scored.summary.unstable_checkpoints == 0
+    assert scored.summary.unknown_stability_checkpoints == 1
+
+
+def test_both_shifts_missing_is_unknown():
+    n = len(sample_checkpoints(recorded_route(), 1000))
+    values = _triplets(n)
+    values[0] = values[2] = MissingWeather(None, "fixture missing")
+    scored, first = _first_checkpoint(values)
+    assert first.unstable is None
+    assert scored.summary.unknown_stability_checkpoints == 1
+
+
+def test_stable_requires_both_shifted_levels_to_be_assessed_and_equal():
+    n = len(sample_checkpoints(recorded_route(), 1000))
+    scored, first = _first_checkpoint(_triplets(n))
+    assert first.unstable is False
+    assert scored.summary.unstable_checkpoints == 0
+    assert scored.summary.unknown_stability_checkpoints == 0
+
+
+def test_missing_base_weather_is_unknown_even_when_shifted_levels_differ():
+    n = len(sample_checkpoints(recorded_route(), 1000))
+    values = _triplets(n)
+    values[0] = sample(40)  # -2h HIGH
+    values[1] = MissingWeather(None, "fixture missing")  # the base itself is missing
+    scored, first = _first_checkpoint(values)
+    assert first.weather_missing
+    assert first.risk_level is None
+    assert first.unstable is None  # there is no base level to compare against
+    assert scored.summary.unknown_stability_checkpoints == 1

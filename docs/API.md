@@ -89,9 +89,10 @@ are `null` when no level can be assessed. Missing weather is never converted to 
 `weather` object is `null` for a missing checkpoint. The summary risk buckets plus
 `missing_weather_miles` account for all checkpoint-owned miles.
 `risk_level_minus_2h` and `risk_level_plus_2h` are the risk levels after shifting the
-checkpoint ETA by two hours earlier or later. `unstable` is true if either shifted level
-differs from the base level, false when both match, and `null` when any required comparison
-cannot be assessed because weather is missing or outside the forecast window. Summary
+checkpoint ETA by two hours earlier or later. `unstable` is true if any assessed shifted level
+differs from the base level (even when the other shift is missing), false only when both shifted
+levels were assessed and match the base, and `null` when no flip is known and a shifted level
+(or the base) cannot be assessed because weather is missing or outside the forecast window. Summary
 counts include true flags in `unstable_checkpoints` and unknown flags in
 `unknown_stability_checkpoints`. Stability does not affect route ranking or recommendation.
 When fewer than three routes are returned, `notices` includes

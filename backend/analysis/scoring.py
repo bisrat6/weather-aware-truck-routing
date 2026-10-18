@@ -20,6 +20,18 @@ class WeatherLookup(Protocol):
     ) -> Sequence[WeatherSample | MissingWeather]: ...
 
 
+def _stability(base: RiskLevel, minus: RiskLevel | None, plus: RiskLevel | None) -> bool | None:
+    """True if any assessed shifted level differs from the base (even if the other shift is
+    missing); None if no flip is known and a shifted level is missing; False only if both
+    shifted levels were assessed and match the base."""
+    assessed = [level for level in (minus, plus) if level is not None]
+    if any(level != base for level in assessed):
+        return True
+    if len(assessed) < 2:
+        return None
+    return False
+
+
 def analyze_route(
     route: Route,
     departure_utc: datetime,
@@ -93,11 +105,7 @@ def analyze_route(
         risk_weighted += int(assessment.level) * cp.owned_mi
         scored_miles += cp.owned_mi
         levels.append(assessment.level)
-        unstable = (
-            None
-            if minus_level is None or plus_level is None
-            else minus_level != assessment.level or plus_level != assessment.level
-        )
+        unstable = _stability(assessment.level, minus_level, plus_level)
         unstable_values.append(unstable)
         output.append(
             CheckpointResult(
