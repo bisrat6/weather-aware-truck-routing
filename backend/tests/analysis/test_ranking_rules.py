@@ -150,6 +150,17 @@ def test_duration_ranks_by_whole_minutes_and_keeps_input_order_when_rounded_equa
     )
 
 
+def test_rounded_duration_tie_does_not_claim_duration_difference():
+    first = summary_result("first", {RiskLevel.LOW: 1}, duration=900)
+    second = summary_result("second", {RiskLevel.LOW: 1}, duration=901)
+    ranking = rank_routes([first, second])
+
+    assert ranking.ranked_results == (first, second)
+    assert "tie" in ranking.reason.lower()
+    assert "min longer" not in ranking.reason
+    assert "min shorter" not in ranking.reason
+
+
 def test_reason_names_severe_criterion_and_appends_duration_difference():
     winner = summary_result(
         "severe winner", {RiskLevel.SEVERE: 2, RiskLevel.LOW: 98}, avg=1.0, duration=1800

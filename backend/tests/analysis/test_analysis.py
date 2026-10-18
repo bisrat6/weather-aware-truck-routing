@@ -180,7 +180,7 @@ def test_ranking_breaks_severe_high_average_then_duration_ties():
         "average", {RiskLevel.SEVERE: 4, RiskLevel.HIGH: 8, RiskLevel.LOW: 88}, 2.1, 800
     )
     duration = result(
-        "duration", {RiskLevel.SEVERE: 4, RiskLevel.HIGH: 8, RiskLevel.LOW: 88}, 2.0, 901
+        "duration", {RiskLevel.SEVERE: 4, RiskLevel.HIGH: 8, RiskLevel.LOW: 88}, 2.0, 1020
     )
     assert rank_routes([severe, baseline, high, average, duration]).recommended == baseline
     assert rank_routes([duration, average, baseline]).recommended == baseline
