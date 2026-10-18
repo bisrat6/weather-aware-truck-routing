@@ -10,6 +10,16 @@ interface ApiErrorBody {
   error?: { code?: unknown; message?: unknown };
 }
 
+export class ApiClientError extends Error {
+  constructor(
+    message: string,
+    readonly code: string | null = null,
+  ) {
+    super(message);
+    this.name = "ApiClientError";
+  }
+}
+
 async function request<T>(
   path: string,
   init?: RequestInit,
@@ -39,7 +49,8 @@ async function request<T>(
         typeof error?.error?.message === "string"
           ? error.error.message
           : bodyText || `Request failed with status ${response.status}`;
-      throw new Error(message);
+      const code = typeof error?.error?.code === "string" ? error.error.code : null;
+      throw new ApiClientError(message, code);
     }
     if (body === null) throw new Error("The server returned an empty or invalid JSON response.");
     return body as T;

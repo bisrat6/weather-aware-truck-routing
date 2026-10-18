@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { analyze } from "./api";
+import { analyze, ApiClientError } from "./api";
 import { PlacePicker, type Place } from "./PlacePicker";
 import { RouteMap } from "./RouteMap";
 import type { AnalyzeResponse } from "./types";
@@ -50,7 +50,11 @@ export default function App() {
       });
       setData(result);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "The request failed.");
+      if (cause instanceof ApiClientError && cause.code === "no_route_found") {
+        setError(cause.message || "No driving route found between these places.");
+      } else {
+        setError(cause instanceof Error ? cause.message : "The request failed.");
+      }
     } finally {
       setLoading(false);
       setWaking(false);
