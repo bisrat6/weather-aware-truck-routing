@@ -331,7 +331,10 @@ function RouteCard({
   } else if (!recommended) {
     const minutesDelta = Math.round(route.duration_s / 60) - Math.round(recommendedRoute.duration_s / 60);
     const milesDelta = Math.round(route.distance_mi) - Math.round(recommendedRoute.distance_mi);
-    const comparison = `${signedDelta(minutesDelta)} min, ${signedDelta(milesDelta)} mi vs Route ${recommendedRoute.route_index + 1}`;
+    const durationComparison = minutesDelta === 0
+      ? "same duration"
+      : `${Math.abs(minutesDelta).toLocaleString()} min ${minutesDelta > 0 ? "longer" : "shorter"}`;
+    const comparison = `${durationComparison}, ${signedDelta(milesDelta)} mi vs Route ${recommendedRoute.route_index + 1}`;
     const severeDelta = Math.round(route.summary.miles_by_level.Severe) - Math.round(recommendedRoute.summary.miles_by_level.Severe);
     const highDelta = Math.round(route.summary.miles_by_level.High) - Math.round(recommendedRoute.summary.miles_by_level.High);
     const higherRiskMiles = [
