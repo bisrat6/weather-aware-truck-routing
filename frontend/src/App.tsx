@@ -285,7 +285,35 @@ function SegmentedControl({
   );
 }
 
+const LOAD_PRESETS = [
+  { label: "Empty · 25k", lb: 25_000 },
+  { label: "Medium · 45k", lb: 45_000 },
+  { label: "Heavy · 65k", lb: 65_000 },
+  { label: "Max · 80k", lb: 80_000 },
+];
+
+function parseLoadShorthand(raw: string): number | null {
+  const trimmed = raw.trim();
+  const kMatch = /^(\d+(?:\.\d+)?)\s*[kK]$/.exec(trimmed);
+  if (kMatch) {
+    const val = parseFloat(kMatch[1]) * 1000;
+    return Number.isFinite(val) ? Math.min(100_000, Math.max(0, Math.round(val))) : null;
+  }
+  const cleanNum = trimmed.replace(/,/g, "");
+  const num = Number(cleanNum);
+  if (Number.isFinite(num) && num >= 0) {
+    return Math.min(100_000, Math.round(num));
+  }
+  return null;
+}
+
 function LoadBar({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  const [inputStr, setInputStr] = useState(value);
+
+  useEffect(() => {
+    setInputStr(value);
+  }, [value]);
+
   const numericValue = Number(value) || 0;
   const visualPercent = Math.max(0, Math.min(numericValue, 80_000)) / 80_000 * 100;
   const note = numericValue > 40_000
@@ -294,9 +322,18 @@ function LoadBar({ value, onChange }: { value: string; onChange: (value: string)
       ? "Stricter wind rules above 30,000 lb"
       : "Load is included in wind risk scoring";
 
-  function clampLoadOnBlur() {
-    const parsed = Number(value);
-    const bounded = Number.isFinite(parsed) ? Math.min(100_000, Math.max(0, Math.trunc(parsed))) : 0;
+  function handleInputChange(text: string) {
+    setInputStr(text);
+    const parsed = parseLoadShorthand(text);
+    if (parsed !== null) {
+      onChange(String(parsed));
+    }
+  }
+
+  function handleBlur() {
+    const parsed = parseLoadShorthand(inputStr);
+    const bounded = parsed !== null ? parsed : (Number(value) || 0);
+    setInputStr(String(bounded));
     onChange(String(bounded));
   }
 
@@ -310,18 +347,41 @@ function LoadBar({ value, onChange }: { value: string; onChange: (value: string)
         </details>
       </div>
       <label className="field-label load-label" htmlFor="load-lb"><Weight size={15} />Cargo weight · lb</label>
-      <input
-        id="load-lb"
-        className="field-input"
-        required
-        type="number"
-        min="0"
-        max="100000"
-        step="1"
-        value={value}
-        onChange={(event) => onChange(event.target.value.replace(/^0+(?=\d)/, ""))}
-        onBlur={clampLoadOnBlur}
-      />
+      <div className="load-input-row">
+        <input
+          id="load-lb"
+          className="field-input load-input"
+          required
+          type="text"
+          inputMode="text"
+          placeholder="e.g. 45k or 45000"
+          value={inputStr}
+          onChange={(event) => handleInputChange(event.target.value)}
+          onBlur={handleBlur}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              handleBlur();
+            }
+          }}
+        />
+        <span className="load-unit-badge">lb</span>
+      </div>
+      <div className="load-shortcuts" role="group" aria-label="Load shortcut presets">
+        {LOAD_PRESETS.map((preset) => (
+          <button
+            key={preset.lb}
+            type="button"
+            className={`load-shortcut-chip${numericValue === preset.lb ? " is-active" : ""}`}
+            onClick={() => {
+              setInputStr(String(preset.lb));
+              onChange(String(preset.lb));
+            }}
+          >
+            {preset.label}
+          </button>
+        ))}
+      </div>
       <div className="load-meter" aria-hidden="true">
         <div className="load-meter__track"><span style={{ width: `${visualPercent}%` }} /></div>
         <i className="load-meter__tick load-meter__tick--30" />
@@ -534,6 +594,7 @@ export default function App() {
   const [waking, setWaking] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState(false);
+  const [legendCollapsed, setLegendCollapsed] = useState(() => typeof window !== "undefined" && window.innerWidth <= 768);
   const routeMapRef = useRef<RouteMapHandle | null>(null);
   const [heatmapContext, setHeatmapContext] = useState<HeatmapContext | null>(null);
   const [heatmapResponse, setHeatmapResponse] = useState<HeatmapResponse | null>(null);
@@ -721,24 +782,43 @@ export default function App() {
           heatmapRequestBytes={heatmapRequestBytes}
           heatmapResponseBytes={heatmapResponseBytes}
         />
-        <div className="risk-legend" aria-label="Risk level legend">
-          <span className="risk-legend__title">Checkpoint risk at arrival</span>
-          {heatmapEnabled && (
-            <span className="risk-legend__layer-title">Weather risk by hour</span>
-          )}
-          <span className="risk-legend__description">
-            {heatmapEnabled
-              ? "Weather risk by hour along route · Checkpoint conditions at ETA"
-              : "Weather and load when the truck reaches each point"}
-          </span>
-          {levelsDemoEnabled && (
-            <span className="heatmap-demo-badge">DEMO DATA</span>
-          )}
-          {RISK_LEVELS.filter(({ label }) => label !== "No data" || heatmapEnabled || levelsDemoEnabled).map(({ label }) => (
-            <span className="risk-legend__item" key={label} style={riskStyle(label)}>
-              <RiskIcon level={label} className="risk-icon risk-legend__icon" />{label}
+        <div className={`risk-legend${legendCollapsed ? " risk-legend--collapsed" : ""}`} aria-label="Risk level legend">
+          <div className="risk-legend__header">
+            <span className="risk-legend__title">
+              {legendCollapsed ? "Risk Legend" : "Checkpoint risk at arrival"}
             </span>
-          ))}
+            <button
+              type="button"
+              className="risk-legend__toggle"
+              aria-expanded={!legendCollapsed}
+              onClick={() => setLegendCollapsed((c) => !c)}
+              title={legendCollapsed ? "Show risk legend" : "Collapse risk legend"}
+            >
+              {legendCollapsed ? "Show ▾" : "Hide ▴"}
+            </button>
+          </div>
+          {!legendCollapsed && (
+            <>
+              {heatmapEnabled && (
+                <span className="risk-legend__layer-title">Weather risk by hour</span>
+              )}
+              <span className="risk-legend__description">
+                {heatmapEnabled
+                  ? "Weather risk by hour along route · Checkpoint conditions at ETA"
+                  : "Weather and load when the truck reaches each point"}
+              </span>
+              {levelsDemoEnabled && (
+                <span className="heatmap-demo-badge">DEMO DATA</span>
+              )}
+              <div className="risk-legend__items">
+                {RISK_LEVELS.filter(({ label }) => label !== "No data" || heatmapEnabled || levelsDemoEnabled).map(({ label }) => (
+                  <span className="risk-legend__item" key={label} style={riskStyle(label)}>
+                    <RiskIcon level={label} className="risk-icon risk-legend__icon" />{label}
+                  </span>
+                ))}
+              </div>
+            </>
+          )}
         </div>
       </section>
 
@@ -755,10 +835,10 @@ export default function App() {
         <div className="trip-panel__content">
           <header className="panel-header">
             <div className="app-icon">
-              <img src="/worldwise-icon.png" alt="World Wise" />
+              <img src="/worldwise-icon.png" alt="RouteCast" />
             </div>
             <div className="panel-header__text">
-              <h1>Weather-Aware Routing</h1>
+              <h1>RouteCast</h1>
               <p>Safest route for your load</p>
             </div>
           </header>

@@ -27,7 +27,7 @@ button:focus-visible, input:focus-visible, summary:focus-visible, [role="radio"]
 .trip-panel__content::-webkit-scrollbar { width: 8px; }
 .trip-panel__content::-webkit-scrollbar-thumb { background: var(--field-border); border: 2px solid var(--surface); border-radius: var(--radius-pill); }
 .trip-panel__content::-webkit-scrollbar-track { background: transparent; }
-.panel-header { display: flex; align-items: center; gap: var(--space-3); min-height: 76px; padding: var(--space-4); border-bottom: 1px solid var(--divider); }
+.panel-header { position: sticky; top: 0; z-index: 10; background: var(--surface); display: flex; align-items: center; gap: var(--space-3); min-height: 72px; padding: var(--space-3) var(--space-4); border-bottom: 1px solid var(--divider); }
 .app-icon { display: grid; width: 40px; height: 40px; flex: 0 0 40px; place-items: center; color: var(--primary); background: transparent; border: 1px solid transparent; border-radius: var(--radius-control); }
 .app-icon img { display: block; width: 28px; height: 28px; object-fit: contain; }
 .panel-header__text { min-width: 0; }
@@ -171,10 +171,15 @@ button:focus-visible, input:focus-visible, summary:focus-visible, [role="radio"]
 @keyframes spin { to { transform: rotate(360deg); } }
 @keyframes shimmer { to { background-position: -200% 0; } }
 
-.risk-legend { position: absolute; z-index: 2; top: var(--space-4); right: var(--space-4); display: flex; flex-wrap: wrap; align-items: center; gap: 4px var(--space-2); max-width: min(460px, calc(100% - var(--space-8))); padding: var(--space-2) var(--space-3); background: var(--surface); border: 1px solid var(--divider); border-radius: var(--radius-control); box-shadow: var(--card-shadow); }
-.risk-legend__title { width: 100%; color: var(--muted); font-size: 10px; font-weight: var(--weight-semibold); text-transform: uppercase; letter-spacing: 0.06em; }
+.risk-legend { position: absolute; z-index: 2; top: var(--space-4); right: var(--space-4); display: flex; flex-direction: column; gap: 4px; max-width: min(460px, calc(100% - var(--space-8))); padding: var(--space-2) var(--space-3); background: var(--surface); border: 1px solid var(--divider); border-radius: var(--radius-control); box-shadow: var(--card-shadow); }
+.risk-legend--collapsed { padding: 4px 10px; width: auto; max-width: max-content; }
+.risk-legend__header { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); width: 100%; }
+.risk-legend__title { color: var(--muted); font-size: 10px; font-weight: var(--weight-semibold); text-transform: uppercase; letter-spacing: 0.06em; }
+.risk-legend__toggle { display: inline-flex; align-items: center; padding: 2px 6px; font-size: 10px; font-weight: var(--weight-semibold); color: var(--link); background: var(--selected-bg); border: 0; border-radius: var(--radius-small); cursor: pointer; }
+.risk-legend__toggle:hover { background: var(--divider); }
 .risk-legend__layer-title { width: 100%; color: var(--text); font-size: 11px; font-weight: var(--weight-semibold); }
 .risk-legend__description { width: 100%; color: var(--muted); font-size: 10px; }
+.risk-legend__items { display: flex; flex-wrap: wrap; align-items: center; gap: 4px var(--space-2); }
 .risk-legend__item { display: inline-flex; align-items: center; gap: var(--space-1); color: var(--risk-color); font-size: 11px; font-weight: var(--weight-medium); white-space: nowrap; }
 .risk-legend__icon { width: 16px; height: 16px; }
 .panel-handle { display: none; }
@@ -182,6 +187,15 @@ button:focus-visible, input:focus-visible, summary:focus-visible, [role="radio"]
 .maplibregl-ctrl-group button { width: var(--touch-target) !important; height: var(--touch-target) !important; }
 .maplibregl-ctrl-bottom-right { right: var(--space-4) !important; bottom: var(--space-8) !important; }
 .maplibregl-ctrl-attrib { color: var(--muted) !important; font: 10px var(--font-family) !important; background: var(--attribution-bg) !important; }
+
+/* Load shortcuts & shorthand styling */
+.load-input-row { position: relative; display: flex; align-items: center; width: 100%; }
+.load-input { padding-right: 36px; }
+.load-unit-badge { position: absolute; right: var(--space-3); color: var(--muted); font-size: var(--font-12); font-weight: var(--weight-semibold); pointer-events: none; }
+.load-shortcuts { display: flex; flex-wrap: wrap; gap: var(--space-1); margin-top: var(--space-1); }
+.load-shortcut-chip { display: inline-flex; align-items: center; padding: 4px 8px; font-size: 11px; font-weight: var(--weight-medium); color: var(--muted); background: var(--surface); border: 1px solid var(--field-border); border-radius: var(--radius-pill); cursor: pointer; transition: all 120ms ease; }
+.load-shortcut-chip:hover { color: var(--text); border-color: var(--link); background: var(--selected-bg); }
+.load-shortcut-chip.is-active { color: var(--primary); font-weight: var(--weight-semibold); border-color: var(--primary); background: var(--selected-bg); }
 
 .checkpoint-popup .maplibregl-popup-content { width: min(320px, calc(100vw - var(--space-8))); padding: var(--space-4); color: var(--text); font-family: var(--font-family); border-radius: var(--radius-control); box-shadow: var(--panel-shadow); }
 .checkpoint-popup .maplibregl-popup-close-button { width: var(--touch-target); height: var(--touch-target); color: var(--muted); font-size: var(--font-20); border-radius: var(--radius-small); }
@@ -207,10 +221,35 @@ button:focus-visible, input:focus-visible, summary:focus-visible, [role="radio"]
   .panel-handle svg { width: 34px; height: 16px; padding: 2px 8px; background: var(--footer-bg); border-radius: var(--radius-pill); }
   .trip-panel--collapsed .trip-panel__content { visibility: hidden; }
   .trip-panel__content { padding-bottom: env(safe-area-inset-bottom); }
-  .risk-legend { top: var(--space-4); right: var(--space-4); left: var(--space-4); max-width: none; }
-  .maplibregl-ctrl-bottom-right { right: var(--space-3) !important; bottom: calc(60dvh + var(--space-6)) !important; }
+
+  /* Compact & non-overlapping risk legend on mobile */
+  .risk-legend {
+    top: var(--space-3);
+    left: var(--space-3);
+    right: auto;
+    max-width: calc(100% - 68px);
+    padding: 6px 10px;
+    backdrop-filter: blur(8px);
+  }
+  .risk-legend--collapsed {
+    max-width: max-content;
+  }
+  .risk-legend__description {
+    display: none;
+  }
+
+  /* Fixed map controls on top-right so they never jump or collide with legend */
+  .map-compass-reset {
+    top: var(--space-3);
+    right: var(--space-3);
+    bottom: auto;
+  }
+  .maplibregl-ctrl-bottom-right {
+    top: calc(var(--space-3) + 42px) !important;
+    right: var(--space-3) !important;
+    bottom: auto !important;
+  }
   .maplibregl-ctrl-attrib { display: block !important; }
-  .map-compass-reset { right: var(--space-3); bottom: calc(60dvh + 120px); }
 }
 @media (max-width: 390px) {
   .checkpoint-row { grid-template-columns: 22px 1fr 1.2fr auto; gap: var(--space-1); }
