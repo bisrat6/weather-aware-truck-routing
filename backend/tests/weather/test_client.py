@@ -42,6 +42,23 @@ def test_units_timezone_and_variables_are_in_the_url(fake_http):
     assert url.startswith("https://api.open-meteo.com/v1/forecast?")
 
 
+def test_default_url_and_proxy_path(fake_http, caplog):
+    fetch_hourly([(40.7, -111.9)], forecast_days=1)
+    assert fake_http.calls[0]["url"] == "https://api.open-meteo.com/v1/forecast"
+    assert "X-Proxy-Token" not in fake_http.calls[0]["headers"]
+
+    token = "secret-proxy-token-xyz"
+    fetch_hourly(
+        [(40.7, -111.9)],
+        forecast_days=1,
+        base_url="https://weather-proxy.internal/api/",
+        proxy_token=token,
+    )
+    assert fake_http.calls[1]["url"] == "https://weather-proxy.internal/api/v1/forecast"
+    assert fake_http.calls[1]["headers"]["X-Proxy-Token"] == token
+    assert token not in caplog.text
+
+
 def test_gusts_are_not_requested(fake_http):
     fetch_hourly([(40.7, -111.9)], forecast_days=1)
     assert "gust" not in fake_http.full_url()
@@ -397,6 +414,54 @@ def test_rate_limit_exhaustion_keeps_retry_hint_and_sanitizes_logs(fake_http, mo
     assert "secret" not in combined
     assert "status=429" in caplog.text
     assert "provider=Open-Meteo" in caplog.text
+
+
+@pytest.mark.parametrize(
+    "reason",
+    [
+        "Daily API request limit exceeded",
+        "daily limit reached",
+        "Open-Meteo DAILY quota exhausted",
+    ],
+)
+def test_rate_limit_daily_fails_fast_without_retries(fake_http, monkeypatch, caplog, reason):
+    fake_http.respond_with(
+        FakeResponse(
+            429,
+            {"error": True, "reason": reason},
+            headers={"Retry-After": "30"},
+        )
+    )
+    delays = []
+    monkeypatch.setattr(client.time, "sleep", delays.append)
+
+    with pytest.raises(WeatherRateLimitError) as info:
+        fetch_hourly([(40.7, -111.9)], forecast_days=1)
+
+    assert fake_http.count == 1
+    assert delays == []
+    assert info.value.retry_after == 30.0
+    assert reason in str(info.value)
+    assert "status=429" in caplog.text
+
+
+def test_proxy_token_is_never_logged_on_rate_limit(fake_http, caplog):
+    token = "super-secret-proxy-token-429"
+    fake_http.respond_with(
+        FakeResponse(
+            429,
+            {"error": True, "reason": "Daily limit exceeded"},
+            headers={"Retry-After": "10"},
+        )
+    )
+    with pytest.raises(WeatherRateLimitError):
+        fetch_hourly(
+            [(40.7, -111.9)],
+            forecast_days=1,
+            base_url="https://weather-proxy.internal",
+            proxy_token=token,
+        )
+    assert token not in caplog.text
 
 
 @pytest.mark.parametrize(

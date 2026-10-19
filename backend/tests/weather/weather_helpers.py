@@ -95,8 +95,15 @@ class FakeHttp:
         self.responder = lambda params: FakeResponse(body=open_meteo_response(params))
         self.raises = None
 
-    def __call__(self, url, params=None, timeout=None):
-        self.calls.append({"url": url, "params": dict(params or {}), "timeout": timeout})
+    def __call__(self, url, params=None, timeout=None, headers=None):
+        self.calls.append(
+            {
+                "url": url,
+                "params": dict(params or {}),
+                "timeout": timeout,
+                "headers": dict(headers or {}),
+            }
+        )
         if self.raises is not None:
             raise self.raises
         return self.responder(params)

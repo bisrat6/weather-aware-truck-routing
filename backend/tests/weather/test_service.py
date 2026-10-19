@@ -331,3 +331,15 @@ def test_default_service_builds_its_own_cache(fake_http):
     svc = WeatherService(now=lambda: NOW)
     svc.weather_at(*SLC, at(hour=10))
     assert len(svc.cache) > 0
+
+
+def test_service_forwards_base_url_and_proxy_token(fake_http):
+    token = "service-proxy-token"
+    svc = WeatherService(
+        base_url="https://proxy.service.example/",
+        proxy_token=token,
+        now=lambda: NOW,
+    )
+    svc.weather_at(*SLC, at(hour=10))
+    assert fake_http.calls[0]["url"] == "https://proxy.service.example/v1/forecast"
+    assert fake_http.calls[0]["headers"]["X-Proxy-Token"] == token

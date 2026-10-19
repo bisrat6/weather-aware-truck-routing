@@ -39,7 +39,8 @@ from weather.models import (
     Point,
 )
 
-BASE_URL = "https://api.open-meteo.com/v1/forecast"
+OPEN_METEO_BASE_URL = "https://api.open-meteo.com"
+BASE_URL = f"{OPEN_METEO_BASE_URL}/v1/forecast"
 HOURLY_VARIABLES: tuple[str, ...] = (VAR_WIND, VAR_RAIN, VAR_SHOWERS, VAR_SNOW)
 WIND_SPEED_UNIT = "mph"
 PRECIPITATION_UNIT = "inch"
@@ -140,11 +141,18 @@ def _log_rate_limit(response: requests.Response, retry_after: float | None) -> N
     )
 
 
+def _forecast_url(base_url: str) -> str:
+    """The forecast endpoint below a configured Open-Meteo host or proxy."""
+    return f"{base_url.rstrip('/')}/v1/forecast"
+
+
 def fetch_raw(
     points: Sequence[Point],
     forecast_days: int,
     *,
     timeout: float | tuple[float, float] = DEFAULT_TIMEOUT,
+    base_url: str = OPEN_METEO_BASE_URL,
+    proxy_token: str | None = None,
 ) -> object:
     """One GET to Open-Meteo for all `points`; returns the decoded JSON.
 
@@ -152,11 +160,14 @@ def fetch_raw(
     not chained, and no message contains the request URL.
     """
     params = build_params(points, forecast_days)
+    request_kwargs = {"headers": {"X-Proxy-Token": proxy_token}} if proxy_token else {}
     started_at = time.monotonic()
     rate_limit_attempt = 0
     while True:
         try:
-            response = requests.get(BASE_URL, params=params, timeout=timeout)
+            response = requests.get(
+                _forecast_url(base_url), params=params, timeout=timeout, **request_kwargs
+            )
         except requests.Timeout:
             raise WeatherTimeoutError(f"Open-Meteo request timed out (timeout={timeout})") from None
         except requests.RequestException as exc:
@@ -169,6 +180,10 @@ def fetch_raw(
 
         retry_after = _retry_after_seconds(response.headers.get("Retry-After"))
         _log_rate_limit(response, retry_after)
+        if "daily" in _reason(response).casefold():
+            raise WeatherRateLimitError(
+                f"Open-Meteo rate limit exceeded: {_reason(response)}", retry_after=retry_after
+            )
         if rate_limit_attempt >= _RATE_LIMIT_RETRIES:
             raise WeatherRateLimitError(
                 f"Open-Meteo rate limit exceeded: {_reason(response)}", retry_after=retry_after
@@ -299,6 +314,8 @@ def fetch_hourly(
     forecast_days: int,
     *,
     timeout: float | tuple[float, float] = DEFAULT_TIMEOUT,
+    base_url: str = OPEN_METEO_BASE_URL,
+    proxy_token: str | None = None,
 ) -> list[HourlySeries]:
     """Hourly forecasts for `points`, one series per point in the same order.
 
@@ -310,6 +327,12 @@ def fetch_hourly(
     series: list[HourlySeries] = []
     for start in range(0, len(points), MAX_POINTS_PER_REQUEST):
         chunk = points[start : start + MAX_POINTS_PER_REQUEST]
-        payload = fetch_raw(chunk, forecast_days, timeout=timeout)
+        payload = fetch_raw(
+            chunk,
+            forecast_days,
+            timeout=timeout,
+            base_url=base_url,
+            proxy_token=proxy_token,
+        )
         series.extend(parse_payload(payload, len(chunk)))
     return series

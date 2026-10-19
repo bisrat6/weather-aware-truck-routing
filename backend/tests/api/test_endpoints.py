@@ -333,6 +333,25 @@ def test_weather_rate_limit_has_retry_hint_and_no_credentials(client, monkeypatc
     assert "open-meteo.com" not in response.content.decode()
 
 
+def test_weather_daily_rate_limit_fails_fast_with_429_json(client, monkeypatch):
+    def get(url, params=None, timeout=None):
+        if "directions/v5" in url:
+            return route_response()
+        return FakeResponse(
+            429,
+            {"error": True, "reason": "Daily API request limit reached"},
+            headers={"Retry-After": "60"},
+        )
+
+    monkeypatch.setattr("requests.get", get)
+    response = client.post("/api/analyze", body(), format="json")
+    assert response.status_code == 429
+    data = response.json()
+    assert data["error"]["code"] == "rate_limited"
+    assert "Weather service rate limit exceeded." in data["error"]["message"]
+    assert "Retry after 60 seconds." in data["error"]["message"]
+
+
 def test_partial_weather_nulls_stay_checkpoint_missing(client, monkeypatch):
     mock_both_providers(monkeypatch, missing_cell=True)
     response = client.post("/api/analyze", body(interval_miles=10), format="json")

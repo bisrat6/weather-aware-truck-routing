@@ -10,7 +10,12 @@ from collections.abc import Callable, Sequence
 from datetime import UTC, datetime, timedelta
 
 from weather.cache import Cell, WeatherCache, cell_center, grid_cell
-from weather.client import DEFAULT_TIMEOUT, MAX_FORECAST_DAYS, fetch_hourly
+from weather.client import (
+    DEFAULT_TIMEOUT,
+    MAX_FORECAST_DAYS,
+    OPEN_METEO_BASE_URL,
+    fetch_hourly,
+)
 from weather.errors import MissingWeatherDataError
 from weather.models import HourValues, MissingWeather, WeatherSample
 from weather.sampling import sample_hour, select_hour
@@ -35,10 +40,14 @@ class WeatherService:
         cache: WeatherCache | None = None,
         *,
         timeout: float | tuple[float, float] = DEFAULT_TIMEOUT,
+        base_url: str = OPEN_METEO_BASE_URL,
+        proxy_token: str | None = None,
         now: Callable[[], datetime] = _utc_now,
     ) -> None:
         self.cache = cache if cache is not None else WeatherCache()
         self._timeout = timeout
+        self._base_url = base_url
+        self._proxy_token = proxy_token
         self._now = now
 
     def weather_at_many(self, queries: Sequence[Query]) -> list[Result]:
@@ -78,7 +87,13 @@ class WeatherService:
         if latest_needed:
             cells = list(latest_needed)
             days = max((hour - today).days for hour in latest_needed.values()) + 1
-            series = fetch_hourly([cell_center(c) for c in cells], days, timeout=self._timeout)
+            series = fetch_hourly(
+                [cell_center(c) for c in cells],
+                days,
+                timeout=self._timeout,
+                base_url=self._base_url,
+                proxy_token=self._proxy_token,
+            )
             for cell, one in zip(cells, series, strict=True):
                 self.cache.put_series(cell, one)
                 fetched[cell] = dict(one.items())

@@ -32,7 +32,10 @@ from routing.mapbox import get_routes
 from weather.errors import WeatherError, WeatherRateLimitError
 from weather.service import WeatherService
 
-_weather_service = WeatherService()
+_weather_service = WeatherService(
+    base_url=settings.OPEN_METEO_BASE_URL,
+    proxy_token=settings.OPEN_METEO_PROXY_TOKEN,
+)
 
 
 def _retry_hint(seconds: float | None) -> str:
