@@ -19,7 +19,7 @@ import {
   type RiskLabel,
 } from "./constants";
 import type { AnalyzedRoute, Checkpoint, HeatmapResponse, RiskLevel } from "./types";
-import { registerRiskIcons, riskIconName, RiskIcon } from "./RiskIcon";
+import { DESTINATION_ICON_NAME, registerDestinationIcon, registerRiskIcons, riskIconName, RiskIcon } from "./RiskIcon";
 
 const CHECKPOINT_SOURCE = "active-route-checkpoints";
 const CHECKPOINT_LAYER = "checkpoint-risk-markers";
@@ -188,7 +188,7 @@ function updateHeatmapFeatureState(
     feature.properties.weather_missing = level === null;
     feature.properties.marker_image = riskIconName(level === null ? "No data" : HEATMAP_LABELS[level]);
     feature.properties.near_checkpoint = checkpointPixels.some(
-      (checkpointPixel) => Math.hypot(pixel.x - checkpointPixel.x, pixel.y - checkpointPixel.y) <= 5,
+      (checkpointPixel) => Math.hypot(pixel.x - checkpointPixel.x, pixel.y - checkpointPixel.y) <= 1.5,
     );
   }
 }
@@ -297,6 +297,7 @@ export function RouteMap({
     if (!loaded || !map) return;
     const onStyleLoad = () => {
       registerRiskIcons(map);
+      registerDestinationIcon(map);
       setStyleRevision((revision) => revision + 1);
     };
     map.on("style.load", onStyleLoad);
@@ -307,6 +308,7 @@ export function RouteMap({
     const map = mapRef.current?.getMap();
     if (!loaded || !map) return;
     registerRiskIcons(map);
+    registerDestinationIcon(map);
 
     const routeIds = new Set(routes.map((route) => String(route.route_index)));
     for (const route of routes) {
@@ -372,7 +374,9 @@ export function RouteMap({
         filter: ["any", ["!=", ["get", "risk_label"], "Low"], ["==", ["get", "demo_marker"], true]],
         layout: {
           "icon-image": ["get", "marker_image"],
-          "icon-size": ["match", ["get", "risk_label"], "Low", 0.42, ["interpolate", ["linear"], ["zoom"], 3, 0.35, 6, 0.67]],
+          // MapLibre only permits camera expressions like `zoom` at the top
+          // level of a layout property; Low checkpoints use their own layer.
+          "icon-size": ["interpolate", ["linear"], ["zoom"], 4, 0.58, 6, 0.72],
           "icon-allow-overlap": true,
           "icon-ignore-placement": true,
         },
@@ -417,8 +421,13 @@ export function RouteMap({
         type: "symbol",
         source: ENDPOINT_SOURCE,
         filter: ["==", ["get", "kind"], "destination"],
-        layout: { "text-field": "▼", "text-font": ["Noto Sans Regular"], "text-size": 18, "text-anchor": "bottom", "text-allow-overlap": true },
-        paint: { "text-color": getThemeToken("--primary"), "text-halo-color": getThemeToken("--surface"), "text-halo-width": 2 },
+        layout: {
+          "icon-image": DESTINATION_ICON_NAME,
+          "icon-size": 1,
+          "icon-anchor": "bottom",
+          "icon-allow-overlap": true,
+          "icon-ignore-placement": true,
+        },
       });
     }
     map.moveLayer(CHECKPOINT_LAYER);
@@ -470,7 +479,9 @@ export function RouteMap({
         id: HEATMAP_LAYER,
         type: "heatmap",
         source: HEATMAP_SOURCE,
-        maxzoom: 9,
+        minzoom: 3,
+        // Forecast symbols start at zoom 6, where the blended glow ends.
+        maxzoom: 6,
         paint: {
           "heatmap-weight": [
             "case",
@@ -478,9 +489,9 @@ export function RouteMap({
             ["interpolate", ["linear"], ["get", "heat_weight"],
               0, 0, 1, 0.3, 2, 0.6, 3, 0.85, 4, 1],
           ],
-          "heatmap-intensity": ["interpolate", ["linear"], ["zoom"], 3, 1, 6, 1, 9, 1],
-          "heatmap-radius": ["interpolate", ["linear"], ["zoom"], 3, 22, 6, 15, 9, 8],
-          "heatmap-opacity": ["interpolate", ["linear"], ["zoom"], 0, 0.85, 8, 0.9],
+          "heatmap-intensity": ["interpolate", ["linear"], ["zoom"], 3, 1.25, 4, 1.3, 9, 1.2, 14, 1],
+          "heatmap-radius": ["interpolate", ["linear"], ["zoom"], 3, 30, 4, 28, 6, 23, 9, 16, 11, 11, 13, 8, 14, 6],
+          "heatmap-opacity": ["interpolate", ["linear"], ["zoom"], 0, 1, 14, 1],
           "heatmap-color": [
             "interpolate", ["linear"], ["heatmap-density"],
             0, "rgba(0,0,0,0)",
@@ -497,7 +508,7 @@ export function RouteMap({
         id: HEATMAP_CIRCLE_LAYER,
         type: "symbol",
         source: HEATMAP_SOURCE,
-        minzoom: 3,
+        minzoom: 6,
         filter: ["all", ["==", ["get", "weather_missing"], false], [">", ["get", "risk_level"], 0], ["==", ["get", "near_checkpoint"], false]],
         layout: {
           "icon-image": ["get", "marker_image"],
@@ -512,7 +523,7 @@ export function RouteMap({
         id: HEATMAP_LOW_CIRCLE_LAYER,
         type: "circle",
         source: HEATMAP_SOURCE,
-        minzoom: 7,
+        minzoom: 6,
         filter: ["all", ["==", ["get", "weather_missing"], false], ["==", ["get", "risk_level"], 0], ["==", ["get", "near_checkpoint"], false]],
         paint: {
           "circle-radius": 2.5,
@@ -526,7 +537,7 @@ export function RouteMap({
         id: HEATMAP_MISSING_LAYER,
         type: "symbol",
         source: HEATMAP_SOURCE,
-        minzoom: 3,
+        minzoom: 7,
         filter: ["all", ["==", ["get", "weather_missing"], true], ["==", ["get", "near_checkpoint"], false]],
         layout: {
           "icon-image": ["get", "marker_image"],
@@ -538,6 +549,13 @@ export function RouteMap({
     }
     for (const layerId of [HEATMAP_LAYER, HEATMAP_CIRCLE_LAYER, HEATMAP_LOW_CIRCLE_LAYER, HEATMAP_MISSING_LAYER]) {
       map.setLayoutProperty(layerId, "visibility", heatmapEnabled ? "visible" : "none");
+    }
+    // Keep the density glow under routes, but put discrete forecast symbols
+    // above route strokes so they remain legible on short, tightly sampled trips.
+    for (const layerId of [HEATMAP_CIRCLE_LAYER, HEATMAP_LOW_CIRCLE_LAYER, HEATMAP_MISSING_LAYER]) {
+      if (map.getLayer(layerId) && map.getLayer(CHECKPOINT_LAYER)) {
+        map.moveLayer(layerId, CHECKPOINT_LAYER);
+      }
     }
   }, [loaded, heatmapData, heatmapEnabled, styleRevision]);
 
@@ -637,7 +655,7 @@ export function RouteMap({
     if (selectedRoute && map.getLayer(`route-${selectedRoute.route_index}-line`)) {
       const lineId = `route-${selectedRoute.route_index}-line`;
       const haloId = `route-${selectedRoute.route_index}-halo`;
-      map.moveLayer(lineId, CHECKPOINT_LAYER);
+      map.moveLayer(lineId, map.getLayer(HEATMAP_CIRCLE_LAYER) ? HEATMAP_CIRCLE_LAYER : CHECKPOINT_LAYER);
       map.moveLayer(haloId, lineId);
     }
   }, [loaded, recommended, routes, selectedRoute, styleRevision]);

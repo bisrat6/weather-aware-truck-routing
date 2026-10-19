@@ -5,7 +5,6 @@ import {
   ChevronUp,
   Clock3,
   CloudSun,
-  Ellipsis,
   Info,
   Route as RouteIcon,
   Weight,
@@ -107,10 +106,12 @@ function HeatmapPanel({
   }
   const worst = [...HEATMAP_RISK_LEVELS].reverse().find((level) => counts[level] > 0);
   const noWeatherHazards = Boolean(response?.points.length)
-    && counts.Moderate + counts.High + counts.Severe + counts["No Travel"] === 0;
+    && counts.Low > 0
+    && counts.Moderate + counts.High + counts.Severe + counts["No Travel"] === 0
+    && counts.Missing === 0;
   const hourStatus = noWeatherHazards
-    ? "No weather hazards along this route at this hour"
-    : `At this hour: ${response?.points.length ?? 0} points, worst level ${worst ?? "No data"} · Low ${counts.Low} · Moderate ${counts.Moderate} · High ${counts.High} · Severe ${counts.Severe} · No Travel ${counts["No Travel"]} · missing ${counts.Missing}`;
+    ? "No weather hazards expected along this route at the selected time."
+    : `${response?.points.length ?? 0} locations checked · Highest risk: ${worst ?? "No forecast data"} · Low ${counts.Low} · Moderate ${counts.Moderate} · High ${counts.High} · Severe ${counts.Severe} · No Travel ${counts["No Travel"]} · No forecast data ${counts.Missing}`;
 
   return (
     <section className="panel-section heatmap-section" aria-labelledby="heatmap-title">
@@ -124,7 +125,7 @@ function HeatmapPanel({
           <span>Show</span>
         </label>
       </div>
-      <label className="field-label" htmlFor="forecast-hour">Forecast hour · {timezone}</label>
+      <label className="field-label" htmlFor="forecast-hour">Your local time · {timezone}</label>
       <output className="heatmap-time" htmlFor="forecast-hour">{timeLabel}</output>
       <input
         id="forecast-hour"
@@ -144,10 +145,15 @@ function HeatmapPanel({
         ))}
       </div>
       <div className="heatmap-range-ends" aria-hidden="true"><span>Departure</span><span>+48 h</span></div>
-      <p className="heatmap-explanation">Map shows weather at this hour for the whole route. Route risk uses the weather when the truck reaches each checkpoint.</p>
+      <p className="heatmap-explanation">The map shows weather along the route at the selected time. Route safety reflects conditions expected when the truck reaches each part of the route.</p>
       {loading && <p className="heatmap-status" role="status">Loading forecast…</p>}
       {unavailable && <p className="heatmap-unavailable" role="status">Forecast overlay unavailable for this route</p>}
-      {response && <p className="heatmap-hour-status" aria-live="polite">{hourStatus}</p>}
+      {response && (
+        <div className="heatmap-hour-summary" aria-live="polite">
+          <span className="heatmap-hour-summary__label">Selected-hour forecast</span>
+          <p className="heatmap-hour-status">{hourStatus}</p>
+        </div>
+      )}
       <p className="heatmap-credit">Weather data by <a href={OPEN_METEO_URL} target="_blank" rel="noreferrer">Open-Meteo</a></p>
     </section>
   );
@@ -309,7 +315,6 @@ function RouteCard({
   recommended,
   selected,
   recommendationReason,
-  recommendedRoute,
   nextRankedRoute,
   onSelect,
 }: {
@@ -317,34 +322,15 @@ function RouteCard({
   recommended: boolean;
   selected: boolean;
   recommendationReason: string;
-  recommendedRoute: AnalyzedRoute;
   nextRankedRoute: AnalyzedRoute | undefined;
   onSelect: () => void;
 }) {
   const level = getRiskLabel(route.summary.max_level);
-  const maxRiskCheckpoint = route.summary.max_level && route.summary.max_level !== "Low"
-    ? route.checkpoints.find((checkpoint) => checkpoint.risk_level === route.summary.max_level && checkpoint.reasons.length > 0)
-    : undefined;
-  let explanation = recommendationReason;
+  const hasHighRiskMiles = route.summary.miles_by_level.Severe > 0 || route.summary.miles_by_level.High > 0;
+  const hasMissingWeather = route.summary.missing_weather_count > 0;
+  let explanation = recommended ? recommendationReason : "";
   if (recommended && nextRankedRoute && /\b(shorter|longer)[.!?]*$/i.test(recommendationReason.trim())) {
     explanation = `${recommendationReason.trim().replace(/[.!?]+$/, "")} than Route ${nextRankedRoute.route_index + 1}`;
-  } else if (!recommended) {
-    const minutesDelta = Math.round(route.duration_s / 60) - Math.round(recommendedRoute.duration_s / 60);
-    const milesDelta = Math.round(route.distance_mi) - Math.round(recommendedRoute.distance_mi);
-    const durationComparison = minutesDelta === 0
-      ? "same duration"
-      : `${Math.abs(minutesDelta).toLocaleString()} min ${minutesDelta > 0 ? "longer" : "shorter"}`;
-    const distanceComparison = milesDelta === 0
-      ? "same distance"
-      : `${Math.abs(milesDelta).toLocaleString()} mi ${milesDelta > 0 ? "longer" : "shorter"}`;
-    const comparison = `${durationComparison}, ${distanceComparison} than Route ${recommendedRoute.route_index + 1}`;
-    const severeDelta = Math.round(route.summary.miles_by_level.Severe) - Math.round(recommendedRoute.summary.miles_by_level.Severe);
-    const highDelta = Math.round(route.summary.miles_by_level.High) - Math.round(recommendedRoute.summary.miles_by_level.High);
-    const higherRiskMiles = [
-      severeDelta > 0 ? `+${severeDelta.toLocaleString()} Severe mi` : "",
-      highDelta > 0 ? `+${highDelta.toLocaleString()} High mi` : "",
-    ].filter(Boolean);
-    explanation = [comparison, ...higherRiskMiles, maxRiskCheckpoint?.reasons[0] ?? ""].filter(Boolean).join(" · ");
   }
 
   return (
@@ -365,17 +351,28 @@ function RouteCard({
         </span>
         <span className="route-card__provider">{route.origin_label}</span>
         <span className="route-card__metrics">
-          <span><RouteIcon size={15} />{formatMiles(route.distance_mi)}</span>
-          <i aria-hidden="true" />
-          <span><Clock3 size={15} />{formatDuration(route.duration_s)}</span>
+          <span className="route-card__metric">
+            <RouteIcon size={15} aria-hidden="true" />
+            <span><small>Distance</small><strong>{formatMiles(route.distance_mi)}</strong></span>
+          </span>
+          <span className="route-card__metric">
+            <Clock3 size={15} aria-hidden="true" />
+            <span><small>Drive time</small><strong>{formatDuration(route.duration_s)}</strong></span>
+          </span>
         </span>
-        <span className="route-card__risk-miles">
-          <span><b className="risk-dot risk-dot--severe" />Severe <strong>{formatMiles(route.summary.miles_by_level.Severe)}</strong></span>
-          <span><b className="risk-dot risk-dot--high" />High <strong>{formatMiles(route.summary.miles_by_level.High)}</strong></span>
-          {route.summary.missing_weather_count > 0 && (
-            <span className="route-card__missing">Weather missing · {formatMiles(route.summary.missing_weather_miles)} · {formatCheckpointCount(route.summary.missing_weather_count)}</span>
-          )}
-        </span>
+        {(hasHighRiskMiles || hasMissingWeather) && (
+          <span className="route-card__risk-miles">
+            {hasHighRiskMiles && (
+              <>
+                <span><RiskIcon level="Severe" className="risk-icon route-card__risk-icon" />Severe <strong>{formatMiles(route.summary.miles_by_level.Severe)}</strong></span>
+                <span><RiskIcon level="High" className="risk-icon route-card__risk-icon" />High <strong>{formatMiles(route.summary.miles_by_level.High)}</strong></span>
+              </>
+            )}
+            {hasMissingWeather && (
+              <span className="route-card__missing">Weather missing · {formatMiles(route.summary.missing_weather_miles)} · {formatCheckpointCount(route.summary.missing_weather_count)}</span>
+            )}
+          </span>
+        )}
         {explanation && <span className="route-card__reason">{explanation}</span>}
         <span className="route-card__footer">
           <span>
@@ -388,7 +385,6 @@ function RouteCard({
               ? ` · ${formatCheckpointCount(route.summary.unknown_stability_checkpoints)} unknown`
               : ""}
           </span>
-          <Ellipsis size={16} aria-hidden="true" />
         </span>
       </button>
     </li>
@@ -419,6 +415,7 @@ function CheckpointList({ checkpoints }: { checkpoints: Checkpoint[] }) {
 export default function App() {
   const heatmapController = useRef<AbortController | null>(null);
   const heatmapCache = useRef(new Map<number, CachedHeatmap>());
+  const resultsSectionRef = useRef<HTMLElement | null>(null);
   const [origin, setOrigin] = useState<Place | null>(null);
   const [destination, setDestination] = useState<Place | null>(null);
   const [departure, setDeparture] = useState(defaultDeparture);
@@ -539,6 +536,12 @@ export default function App() {
       setSelectedRoute(result.recommended);
       setTab("routes");
       setHeatmapContext({ departureUtc, loadLb: Number(loadLb) });
+      window.requestAnimationFrame(() => {
+        resultsSectionRef.current?.scrollIntoView({
+          behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
+          block: "start",
+        });
+      });
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "The request failed.");
     } finally {
@@ -548,16 +551,9 @@ export default function App() {
   }
 
   const routes = data ? rankedRoutes(data) : [];
-  const recommendedRoute = routes.find((route) => route.route_index === data?.recommended);
   const recommendedPosition = routes.findIndex((route) => route.route_index === data?.recommended);
   const nextRankedRoute = recommendedPosition >= 0 ? routes[recommendedPosition + 1] : undefined;
   const levelsDemoEnabled = import.meta.env.DEV && new URLSearchParams(window.location.search).get("demo") === "levels";
-  const heatmapHasNoHazards = Boolean(displayedHeatmapResponse?.points.length)
-    && displayedHeatmapResponse!.points.every((point) => {
-      const level = point.risk[heatmapHour];
-      return level === null || level === 0;
-    });
-
   function handleTabKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
     if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
     event.preventDefault();
@@ -581,11 +577,11 @@ export default function App() {
           heatmapResponseBytes={heatmapResponseBytes}
         />
         <div className="risk-legend" aria-label="Risk level legend">
-          <span className="risk-legend__title">Checkpoint risk</span>
+          <span className="risk-legend__title">Checkpoint risk at arrival</span>
+          <span className="risk-legend__description">Weather and load when the truck reaches each point</span>
           {levelsDemoEnabled && (
             <span className="heatmap-demo-badge">DEMO DATA</span>
           )}
-          {heatmapHasNoHazards && <span className="risk-legend__notice">No weather hazards along this route at this hour</span>}
           {RISK_LEVELS.filter(({ label }) => label !== "No data" || heatmapEnabled || levelsDemoEnabled).map(({ label }) => (
             <span className="risk-legend__item" key={label} style={riskStyle(label)}>
               <RiskIcon level={label} className="risk-icon risk-legend__icon" />{label}
@@ -615,7 +611,7 @@ export default function App() {
             </div>
           </header>
 
-          <form onSubmit={submit}>
+          <form className="trip-form" onSubmit={submit}>
             <section className="panel-section" aria-labelledby="trip-title">
               <h2 id="trip-title" className="section-title">Trip</h2>
               <PlacePicker id="origin" label="Origin" value={origin} onChange={setOrigin} />
@@ -630,16 +626,18 @@ export default function App() {
                 value={String(intervalMiles)}
                 onChange={(value) => setIntervalMiles(Number(value) as IntervalMiles)}
               />
-              <button className="analyze-button" type="submit" disabled={loading || !origin || !destination}>
+              <button className="analyze-button" type="submit" disabled={loading || !origin || !destination} aria-busy={loading}>
                 {loading ? "Analyzing routes…" : "Analyze routes"}
-                <RouteIcon size={16} aria-hidden="true" />
+                {loading
+                  ? <span className="analyze-button__spinner" aria-hidden="true" />
+                  : <RouteIcon size={16} aria-hidden="true" />}
               </button>
             </section>
 
             <LoadBar value={loadLb} onChange={setLoadLb} />
           </form>
 
-          <section className="panel-section results-section" aria-labelledby="routes-title">
+          <section ref={resultsSectionRef} className="panel-section results-section" aria-labelledby="routes-title">
             <div className="section-title-row">
               <h2 id="routes-title" className="section-title">Routes</h2>
               {data && <span className="route-count">{data.routes.length} available</span>}
@@ -673,7 +671,6 @@ export default function App() {
                         recommended={route.route_index === data.recommended}
                         selected={route.route_index === (selectedRoute ?? data.recommended)}
                         recommendationReason={data.recommendation_reason}
-                        recommendedRoute={recommendedRoute ?? route}
                         nextRankedRoute={nextRankedRoute}
                         onSelect={() => setSelectedRoute(route.route_index)}
                       />

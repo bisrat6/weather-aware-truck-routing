@@ -1,13 +1,13 @@
 import type { RiskLevel } from "./types";
 
 export type RiskLabel = RiskLevel | "No data";
-export type RiskShape = "circle" | "diamond" | "triangle" | "square" | "cross" | "missing";
+export type RiskShape = "circle" | "circle-alert" | "triangle-alert" | "shield-alert" | "cross" | "missing";
 
 export const riskStyles: Record<RiskLabel, { label: RiskLabel; color: string; shape: RiskShape }> = {
   Low: { label: "Low", color: "--risk-low", shape: "circle" },
-  Moderate: { label: "Moderate", color: "--risk-moderate", shape: "diamond" },
-  High: { label: "High", color: "--risk-high", shape: "triangle" },
-  Severe: { label: "Severe", color: "--risk-severe", shape: "square" },
+  Moderate: { label: "Moderate", color: "--risk-moderate", shape: "circle-alert" },
+  High: { label: "High", color: "--risk-high", shape: "triangle-alert" },
+  Severe: { label: "Severe", color: "--risk-severe", shape: "shield-alert" },
   "No Travel": { label: "No Travel", color: "--risk-no-travel", shape: "cross" },
   "No data": { label: "No data", color: "--risk-no-data", shape: "missing" },
 };
