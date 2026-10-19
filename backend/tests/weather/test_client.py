@@ -3,7 +3,7 @@ import math
 
 import pytest
 import requests
-from weather_helpers import FIXTURE_POINTS, FakeResponse, load_fixture
+from weather_helpers import FIXTURE_POINTS, FakeResponse, load_fixture, open_meteo_response
 
 from weather import client
 from weather.client import (
@@ -511,3 +511,194 @@ def test_long_provider_reasons_are_truncated(fake_http):
     with pytest.raises(WeatherRequestError) as info:
         fetch_hourly([(40.7, -111.9)], forecast_days=1)
     assert len(str(info.value)) < 500
+
+
+# ------------------------------------------------------------------ transient failures
+
+OVERLOADED = {"reason": "The service is overloaded", "error": True}
+POINT = [(40.7, -111.9)]
+
+
+def _sequence(fake_http, responses):
+    iterator = iter(responses)
+    fake_http.responder = lambda params: next(iterator)
+
+
+@pytest.mark.parametrize("status", [503, 500, 400, 200])
+def test_overloaded_reply_is_retried_then_succeeds(fake_http, monkeypatch, status):
+    _sequence(
+        fake_http,
+        [FakeResponse(status, OVERLOADED), FakeResponse(200, load_fixture()[0])],
+    )
+    delays = []
+    monkeypatch.setattr(client.time, "sleep", delays.append)
+
+    (series,) = fetch_hourly(POINT, forecast_days=1)
+
+    assert len(series.times) == 48
+    assert fake_http.count == 2
+    assert delays == [1.0]
+
+
+def test_5xx_without_a_reason_is_retried_with_1s_then_2s_backoff(fake_http, monkeypatch):
+    _sequence(
+        fake_http,
+        [
+            FakeResponse(502, text="Bad Gateway"),
+            FakeResponse(503, text="", bad_json=True),
+            FakeResponse(200, load_fixture()[0]),
+        ],
+    )
+    delays = []
+    monkeypatch.setattr(client.time, "sleep", delays.append)
+    fetch_hourly(POINT, forecast_days=1)
+    assert fake_http.count == 3
+    assert delays == [1.0, 2.0]
+
+
+@pytest.mark.parametrize(
+    ("status", "expected"),
+    [(503, WeatherServerError), (200, WeatherRequestError), (400, WeatherRequestError)],
+)
+def test_overloaded_retries_exhausted_fail_as_before(fake_http, monkeypatch, status, expected):
+    fake_http.respond_with(FakeResponse(status, OVERLOADED))
+    delays = []
+    monkeypatch.setattr(client.time, "sleep", delays.append)
+
+    with pytest.raises(expected) as info:
+        fetch_hourly(POINT, forecast_days=1)
+
+    assert fake_http.count == 3  # first try + 2 retries
+    assert delays == [1.0, 2.0]
+    assert "overloaded" in str(info.value)
+
+
+def test_retry_stops_when_the_shared_budget_is_spent(fake_http, monkeypatch):
+    fake_http.respond_with(FakeResponse(503, OVERLOADED))
+    now = [0.0]
+    monkeypatch.setattr(client.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(client.time, "sleep", lambda seconds: now.__setitem__(0, now[0] + 10))
+    with pytest.raises(WeatherServerError):
+        fetch_hourly(POINT, forecast_days=1)
+    assert fake_http.count == 2  # one retry, then the 6 s budget is gone
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        FakeResponse(400, {"error": True, "reason": "Cannot initialize WeatherVariable"}),
+        FakeResponse(404, {"error": True, "reason": "Not found"}),
+        FakeResponse(200, {"error": True, "reason": "odd"}),
+    ],
+)
+def test_other_errors_are_not_retried(fake_http, response):
+    fake_http.respond_with(response)
+    with pytest.raises(WeatherRequestError):
+        fetch_hourly(POINT, forecast_days=1)
+    assert fake_http.count == 1
+
+
+@pytest.mark.parametrize("raises", [requests.Timeout("slow"), requests.ConnectionError("down")])
+def test_timeouts_and_connection_errors_are_not_retried(fake_http, raises):
+    fake_http.raises = raises
+    with pytest.raises(WeatherError):
+        fetch_hourly(POINT, forecast_days=1)
+    assert fake_http.count == 1
+
+
+# ------------------------------------------------------------------ failure logging
+
+
+def _failure_lines(caplog):
+    return [r.getMessage() for r in caplog.records if "weather request failed" in r.getMessage()]
+
+
+def test_each_failed_attempt_is_logged_with_all_fields(fake_http, monkeypatch, caplog):
+    fake_http.respond_with(FakeResponse(503, OVERLOADED))
+    monkeypatch.setattr(client.time, "sleep", lambda seconds: None)
+    with pytest.raises(WeatherServerError):
+        fetch_hourly(POINT, forecast_days=1)
+
+    lines = _failure_lines(caplog)
+    assert len(lines) == 3
+    for number, line in enumerate(lines, start=1):
+        assert "provider=Open-Meteo" in line
+        assert "exception=WeatherServerError" in line
+        assert "status=503" in line
+        assert f"attempt={number}/3" in line
+        assert "elapsed_s=" in line
+        assert "locations=1" in line
+        assert "chunk=1/1" in line
+        assert "other_requests_in_flight=0" in line
+        assert "reason=The service is overloaded" in line
+    assert [("retry=True" in line) for line in lines] == [True, True, False]
+
+
+@pytest.mark.parametrize(
+    ("raises", "exception", "reason"),
+    [
+        (requests.ReadTimeout("https://x/?latitude=1"), "WeatherTimeoutError", "ReadTimeout"),
+        (requests.ConnectionError("down"), "WeatherConnectionError", "ConnectionError"),
+    ],
+)
+def test_network_failures_are_logged_with_the_exception_type_only(
+    fake_http, caplog, raises, exception, reason
+):
+    fake_http.raises = raises
+    with pytest.raises(WeatherError):
+        fetch_hourly(POINT, forecast_days=1)
+    (line,) = _failure_lines(caplog)
+    assert f"exception={exception}" in line and "status=None" in line
+    assert line.endswith(f"reason={reason}")
+    assert "https" not in line
+
+
+def test_log_reason_is_truncated_and_sanitized(fake_http, monkeypatch, caplog):
+    token = "secret-proxy-token-5xx"
+    reason = (
+        "overloaded see https://api.open-meteo.com/v1/forecast?latitude=40.7&longitude=-111.9 "
+        "latitude=40.7 longitude=-111.9 token=abc123 " + "y" * 500
+    )
+    fake_http.respond_with(FakeResponse(503, {"error": True, "reason": reason}))
+    monkeypatch.setattr(client.time, "sleep", lambda seconds: None)
+    with pytest.raises(WeatherServerError):
+        fetch_hourly(
+            POINT, forecast_days=1, base_url="https://proxy.internal", proxy_token=token
+        )
+    for line in _failure_lines(caplog):
+        logged_reason = line.split("reason=", 1)[1]
+        assert len(logged_reason) <= 100
+        for secret in ("api.open-meteo.com", "40.7", "-111.9", "abc123", token, "proxy.internal"):
+            assert secret not in line
+    assert token not in caplog.text and "proxy.internal" not in caplog.text
+
+
+def test_failing_chunk_and_location_count_are_logged(fake_http, monkeypatch, caplog):
+    points = [(round(i / 10, 1), -100.0) for i in range(client.MAX_POINTS_PER_REQUEST + 1)]
+    fake_http.responder = lambda params: (
+        FakeResponse(body=open_meteo_response(params))
+        if fake_http.count == 1
+        else FakeResponse(503, OVERLOADED)
+    )
+    monkeypatch.setattr(client.time, "sleep", lambda seconds: None)
+    with pytest.raises(WeatherServerError):
+        fetch_hourly(points, forecast_days=1)
+    lines = _failure_lines(caplog)
+    assert len(lines) == 3
+    assert all("chunk=2/2" in line and "locations=1 " in line for line in lines)
+
+
+def test_unparseable_payload_is_logged(fake_http, caplog):
+    fake_http.respond_with(FakeResponse(200, {"hourly": {}}))
+    with pytest.raises(WeatherResponseError):
+        fetch_hourly(POINT, forecast_days=1)
+    (line,) = _failure_lines(caplog)
+    assert "exception=WeatherResponseError" in line and "status=200" in line
+
+
+def test_invalid_json_body_is_logged(fake_http, caplog):
+    fake_http.respond_with(FakeResponse(200, bad_json=True, text="<html>"))
+    with pytest.raises(WeatherResponseError):
+        fetch_hourly(POINT, forecast_days=1)
+    (line,) = _failure_lines(caplog)
+    assert "exception=WeatherResponseError" in line and "not valid JSON" in line

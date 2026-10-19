@@ -14,6 +14,7 @@ from __future__ import annotations
 import logging
 import math
 import re
+import threading
 import time
 from collections.abc import Sequence
 from datetime import UTC, datetime
@@ -23,6 +24,7 @@ import requests
 
 from weather.errors import (
     WeatherConnectionError,
+    WeatherError,
     WeatherRateLimitError,
     WeatherRequestError,
     WeatherResponseError,
@@ -57,12 +59,31 @@ _LOG_REASON_LIMIT = 200
 _RATE_LIMIT_RETRIES = 2
 _RATE_LIMIT_BUDGET_SECONDS = 6.0
 _RATE_LIMIT_BACKOFF_SECONDS = 1.0
+_TRANSIENT_RETRIES = 2  # 5xx or "overloaded": backoff 1 s then 2 s, same budget as 429
+_FAILURE_REASON_LIMIT = 100
 _URL_PATTERN = re.compile(r"https?://\S+", re.IGNORECASE)
 _SENSITIVE_PARAMETER_PATTERN = re.compile(
     r"\b(?:access_token|api[_-]?key|token|key|latitude|longitude|lat|lon)=[^\s&]+",
     re.IGNORECASE,
 )
 logger = logging.getLogger(__name__)
+
+_in_flight = 0  # Open-Meteo requests currently running in this process (all threads)
+_in_flight_lock = threading.Lock()
+
+
+def _enter_flight() -> None:
+    global _in_flight
+    with _in_flight_lock:
+        _in_flight += 1
+
+
+def _leave_flight() -> int:
+    """Leave the in-flight set; return how many other requests are still running."""
+    global _in_flight
+    with _in_flight_lock:
+        _in_flight -= 1
+        return _in_flight
 
 
 def _fmt(value: float) -> str:
@@ -141,6 +162,60 @@ def _log_rate_limit(response: requests.Response, retry_after: float | None) -> N
     )
 
 
+def _error_reason(response: requests.Response) -> str | None:
+    """The provider's reason if this response is an error, else None."""
+    if response.status_code != 200:
+        return _reason(response)
+    try:
+        body = response.json()
+    except ValueError:
+        return None
+    return _reason(response) if isinstance(body, dict) and body.get("error") is True else None
+
+
+def _is_transient(status: int, reason: str) -> bool:
+    return status >= 500 or "overloaded" in reason.casefold()
+
+
+def _transient_delay(attempt: int, started_at: float) -> float | None:
+    """Seconds to wait before retry number attempt + 1, or None when retries are used up."""
+    remaining = _RATE_LIMIT_BUDGET_SECONDS - (time.monotonic() - started_at)
+    if attempt >= _TRANSIENT_RETRIES or remaining <= 0:
+        return None
+    return min(_RATE_LIMIT_BACKOFF_SECONDS * 2**attempt, remaining)
+
+
+def _log_failure(
+    exception: str,
+    status: int | None,
+    reason: str,
+    *,
+    attempt: int,
+    started_at: float,
+    locations: int,
+    chunk: tuple[int, int],
+    other_in_flight: int,
+    will_retry: bool = False,
+) -> None:
+    """One WARNING per failed attempt. Never includes URLs, coordinates or tokens."""
+    logger.warning(
+        "weather request failed provider=%s exception=%s status=%s attempt=%d/%d "
+        "elapsed_s=%.2f locations=%d chunk=%d/%d other_requests_in_flight=%d retry=%s reason=%s",
+        "Open-Meteo",
+        exception,
+        status,
+        attempt,
+        _TRANSIENT_RETRIES + 1,
+        time.monotonic() - started_at,
+        locations,
+        chunk[0],
+        chunk[1],
+        other_in_flight,
+        will_retry,
+        " ".join(_safe_reason(reason).split())[:_FAILURE_REASON_LIMIT],
+    )
+
+
 def _forecast_url(base_url: str) -> str:
     """The forecast endpoint below a configured Open-Meteo host or proxy."""
     return f"{base_url.rstrip('/')}/v1/forecast"
@@ -153,29 +228,72 @@ def fetch_raw(
     timeout: float | tuple[float, float] = DEFAULT_TIMEOUT,
     base_url: str = OPEN_METEO_BASE_URL,
     proxy_token: str | None = None,
+    chunk: tuple[int, int] = (1, 1),
 ) -> object:
     """One GET to Open-Meteo for all `points`; returns the decoded JSON.
 
     Raises a WeatherError subclass for every failure. Underlying `requests` exceptions are
-    not chained, and no message contains the request URL.
+    not chained, and no message contains the request URL. HTTP 5xx and "overloaded" replies
+    are retried twice (1 s, then 2 s) within the same budget as the 429 path. `chunk` is
+    (index, total) and only labels log lines. Every failed attempt is logged.
     """
     params = build_params(points, forecast_days)
     request_kwargs = {"headers": {"X-Proxy-Token": proxy_token}} if proxy_token else {}
     started_at = time.monotonic()
     rate_limit_attempt = 0
+    transient_attempt = 0
+    attempt = 0
     while True:
+        attempt += 1
+        _enter_flight()
         try:
             response = requests.get(
                 _forecast_url(base_url), params=params, timeout=timeout, **request_kwargs
             )
-        except requests.Timeout:
-            raise WeatherTimeoutError(f"Open-Meteo request timed out (timeout={timeout})") from None
         except requests.RequestException as exc:
+            timed_out = isinstance(exc, requests.Timeout)
+            _log_failure(
+                "WeatherTimeoutError" if timed_out else "WeatherConnectionError",
+                None,
+                type(exc).__name__,
+                attempt=attempt,
+                started_at=started_at,
+                locations=len(points),
+                chunk=chunk,
+                other_in_flight=_leave_flight(),
+            )
+            if timed_out:
+                raise WeatherTimeoutError(
+                    f"Open-Meteo request timed out (timeout={timeout})"
+                ) from None
             message = f"could not reach Open-Meteo ({type(exc).__name__})"
             raise WeatherConnectionError(message) from None
+        others = _leave_flight()
 
         status = response.status_code
         if status != 429:
+            failure = _error_reason(response)
+            if failure is not None:
+                delay = (
+                    _transient_delay(transient_attempt, started_at)
+                    if _is_transient(status, failure)
+                    else None
+                )
+                _log_failure(
+                    "WeatherServerError" if status >= 500 else "WeatherRequestError",
+                    status,
+                    failure,
+                    attempt=attempt,
+                    started_at=started_at,
+                    locations=len(points),
+                    chunk=chunk,
+                    other_in_flight=others,
+                    will_retry=delay is not None,
+                )
+                if delay is not None:
+                    time.sleep(delay)
+                    transient_attempt += 1
+                    continue
             break
 
         retry_after = _retry_after_seconds(response.headers.get("Retry-After"))
@@ -213,6 +331,16 @@ def fetch_raw(
     try:
         payload = response.json()
     except ValueError:
+        _log_failure(
+            "WeatherResponseError",
+            status,
+            "response was not valid JSON",
+            attempt=attempt,
+            started_at=started_at,
+            locations=len(points),
+            chunk=chunk,
+            other_in_flight=others,
+        )
         raise WeatherResponseError("Open-Meteo response was not valid JSON") from None
     if isinstance(payload, dict) and payload.get("error") is True:
         raise WeatherRequestError(
@@ -325,14 +453,30 @@ def fetch_hourly(
     if not points:
         raise ValueError("at least one point is required")
     series: list[HourlySeries] = []
-    for start in range(0, len(points), MAX_POINTS_PER_REQUEST):
+    total = math.ceil(len(points) / MAX_POINTS_PER_REQUEST)
+    for number, start in enumerate(range(0, len(points), MAX_POINTS_PER_REQUEST), start=1):
         chunk = points[start : start + MAX_POINTS_PER_REQUEST]
+        started_at = time.monotonic()
         payload = fetch_raw(
             chunk,
             forecast_days,
             timeout=timeout,
             base_url=base_url,
             proxy_token=proxy_token,
+            chunk=(number, total),
         )
-        series.extend(parse_payload(payload, len(chunk)))
+        try:
+            series.extend(parse_payload(payload, len(chunk)))
+        except WeatherError as exc:
+            _log_failure(
+                type(exc).__name__,
+                200,
+                str(exc),
+                attempt=1,
+                started_at=started_at,
+                locations=len(chunk),
+                chunk=(number, total),
+                other_in_flight=_in_flight,
+            )
+            raise
     return series

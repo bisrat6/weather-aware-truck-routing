@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import UTC
 
 from django.conf import settings
@@ -32,6 +33,8 @@ from routing.fallback import augment_routes
 from routing.mapbox import get_routes
 from weather.errors import WeatherError, WeatherRateLimitError
 from weather.service import WeatherService
+
+logger = logging.getLogger(__name__)
 
 _weather_service = WeatherService(
     base_url=settings.OPEN_METEO_BASE_URL,
@@ -115,7 +118,10 @@ def analyze(request: Request) -> Response:
             "Weather service rate limit exceeded." + _retry_hint(exc.retry_after),
             429,
         ) from None
-    except WeatherError:
+    except WeatherError as exc:
+        logger.warning(
+            "weather_unavailable returned endpoint=analyze exception=%s", type(exc).__name__
+        )
         raise APIError("weather_unavailable", "Weather service is unavailable.", 502) from None
 
     ranking = rank_routes(results)
@@ -197,6 +203,9 @@ def heatmap(request: Request) -> Response:
             "Weather service rate limit exceeded." + _retry_hint(exc.retry_after),
             429,
         ) from None
-    except WeatherError:
+    except WeatherError as exc:
+        logger.warning(
+            "weather_unavailable returned endpoint=heatmap exception=%s", type(exc).__name__
+        )
         raise APIError("weather_unavailable", "Weather service is unavailable.", 502) from None
     return Response(result)
