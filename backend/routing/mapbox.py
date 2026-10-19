@@ -56,20 +56,38 @@ def _check_factor(factor: float) -> None:
         raise ValueError(f"truck_time_factor must be finite and > 0, got {factor!r}")
 
 
-def build_request(origin: Coord, dest: Coord, token: str) -> tuple[str, dict[str, str]]:
-    """Return (url, query params). Mapbox wants lon,lat order in the path."""
+def build_request(
+    origin: Coord,
+    dest: Coord,
+    token: str,
+    *,
+    via: Coord | None = None,
+    exclude: str | None = None,
+    alternatives: bool = True,
+) -> tuple[str, dict[str, str]]:
+    """Return (url, query params). Mapbox wants lon,lat order in the path.
+
+    `via` adds one intermediate waypoint (origin -> via -> dest); `exclude` is Mapbox's
+    `exclude` value, for example "motorway".
+    """
     _check_point("origin", origin)
     _check_point("dest", dest)
+    if via is not None:
+        _check_point("via", via)
     if not token:
         raise ValueError("a Mapbox access token is required")
-    url = f"{BASE_URL}/{origin[1]:.6f},{origin[0]:.6f};{dest[1]:.6f},{dest[0]:.6f}"
+    points = [origin] if via is None else [origin, via]
+    path = ";".join(f"{lon:.6f},{lat:.6f}" for lat, lon in [*points, dest])
+    url = f"{BASE_URL}/{path}"
     params = {
-        "alternatives": "true",
+        "alternatives": "true" if alternatives else "false",
         "overview": "full",
         "geometries": "geojson",
         "annotations": "distance,duration",
         "access_token": token,
     }
+    if exclude:
+        params["exclude"] = exclude
     return url, params
 
 
@@ -116,6 +134,9 @@ def fetch_directions(
     token: str,
     *,
     timeout: float | tuple[float, float] = DEFAULT_TIMEOUT,
+    via: Coord | None = None,
+    exclude: str | None = None,
+    alternatives: bool = True,
 ) -> dict[str, Any]:
     """Call Mapbox Directions and return the raw JSON payload (code == "Ok").
 
@@ -123,7 +144,9 @@ def fetch_directions(
     messages; the underlying requests exception is deliberately not chained because
     its text contains the full URL, including the token.
     """
-    url, params = build_request(origin, dest, token)
+    url, params = build_request(
+        origin, dest, token, via=via, exclude=exclude, alternatives=alternatives
+    )
     try:
         response = requests.get(url, params=params, timeout=timeout)
     except requests.Timeout:

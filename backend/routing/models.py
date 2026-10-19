@@ -40,7 +40,8 @@ class Route:
     distance_m: float
     duration_s: float
     eta_method: EtaMethod
-    origin_label: str  # "provider alternative" or "forced detour via <place>"
+    # "provider alternative", "avoiding motorways" or "forced detour, left|right of the main route"
+    origin_label: str
 
     def __post_init__(self) -> None:
         n = len(self.coords)
