@@ -112,6 +112,7 @@ function heatmapDensityRadiusExpression(): ExpressionSpecification {
     5, 8,
     7, 11,
     9, 14,
+    12, 18,
   ] as unknown as ExpressionSpecification;
 }
 
@@ -625,7 +626,7 @@ export const RouteMap = forwardRef<RouteMapHandle, RouteMapProps>(function Route
           type: "heatmap",
           source: HEATMAP_SOURCE,
           minzoom: 3,
-          maxzoom: 8,
+          maxzoom: 14,
           paint: {
             "heatmap-weight": heatmapWeightExpression(0),
             "heatmap-intensity": ["interpolate", ["linear"], ["zoom"], 3, 0.8, 6, 0.9, 8, 1.0],
