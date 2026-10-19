@@ -68,10 +68,10 @@ function heatmapWeightExpression(hour: number): ExpressionSpecification {
   return [
     "case",
     ["==", ["at", hour, ["get", "risk_values"]], null], 0,
-    ["==", ["at", hour, ["get", "risk_values"]], 0], 0.0,
-    ["==", ["at", hour, ["get", "risk_values"]], 1], 0.4,
-    ["==", ["at", hour, ["get", "risk_values"]], 2], 0.7,
-    ["==", ["at", hour, ["get", "risk_values"]], 3], 0.9,
+    ["==", ["at", hour, ["get", "risk_values"]], 0], 0.20,
+    ["==", ["at", hour, ["get", "risk_values"]], 1], 0.45,
+    ["==", ["at", hour, ["get", "risk_values"]], 2], 0.70,
+    ["==", ["at", hour, ["get", "risk_values"]], 3], 0.90,
     ["==", ["at", hour, ["get", "risk_values"]], 4], 1.0,
     0,
   ] as unknown as ExpressionSpecification;
@@ -96,10 +96,10 @@ function heatmapDensityColorExpression(): ExpressionSpecification {
     ["linear"],
     ["heatmap-density"],
     0.0, "rgba(0, 0, 0, 0)",
-    0.15, "rgba(245, 158, 11, 0.0)",
-    0.35, "rgba(217, 119, 6, 0.65)",
-    0.6, getRiskColor("High"),
-    0.85, getRiskColor("Severe"),
+    0.08, "rgba(16, 185, 129, 0.45)",
+    0.28, "rgba(245, 158, 11, 0.65)",
+    0.55, getRiskColor("High"),
+    0.80, getRiskColor("Severe"),
     1.0, getRiskColor("No Travel"),
   ] as unknown as ExpressionSpecification;
 }
@@ -109,11 +109,13 @@ function heatmapDensityRadiusExpression(): ExpressionSpecification {
     "interpolate",
     ["linear"],
     ["zoom"],
-    3, 6,
-    5, 8,
-    7, 11,
-    9, 14,
-    12, 18,
+    0, 8,
+    3, 14,
+    5, 18,
+    7, 24,
+    9, 28,
+    12, 34,
+    16, 42,
   ] as unknown as ExpressionSpecification;
 }
 
@@ -398,7 +400,7 @@ export const RouteMap = forwardRef<RouteMapHandle, RouteMapProps>(function Route
         map.setPaintProperty(HEATMAP_LAYER, "heatmap-weight", heatmapWeightExpression(hour));
         map.setPaintProperty(HEATMAP_LAYER, "heatmap-color", heatmapDensityColorExpression());
         map.setPaintProperty(HEATMAP_LAYER, "heatmap-radius", heatmapDensityRadiusExpression());
-        map.setPaintProperty(HEATMAP_LAYER, "heatmap-opacity", 0.65);
+        map.setPaintProperty(HEATMAP_LAYER, "heatmap-opacity", 0.75);
       }
       if (map.getLayer(HEATMAP_CIRCLE_LAYER)) {
         map.setPaintProperty(HEATMAP_CIRCLE_LAYER, "circle-color", heatmapColorExpression(hour));
@@ -515,13 +517,13 @@ export const RouteMap = forwardRef<RouteMapHandle, RouteMapProps>(function Route
         id: CHECKPOINT_LAYER,
         type: "symbol",
         source: CHECKPOINT_SOURCE,
-        minzoom: 4,
+        minzoom: 2,
         filter: ["any", ["!=", ["get", "risk_label"], "Low"], ["==", ["get", "demo_marker"], true]],
         layout: {
           "icon-image": ["get", "marker_image"],
           // MapLibre only permits camera expressions like `zoom` at the top
           // level of a layout property; Low checkpoints use their own layer.
-          "icon-size": ["interpolate", ["linear"], ["zoom"], 4, 0.58, 6, 0.72],
+          "icon-size": ["interpolate", ["linear"], ["zoom"], 2, 0.40, 4, 0.58, 6, 0.72],
           "icon-allow-overlap": true,
           "icon-ignore-placement": true,
         },
@@ -532,11 +534,11 @@ export const RouteMap = forwardRef<RouteMapHandle, RouteMapProps>(function Route
         id: CHECKPOINT_LOW_LAYER,
         type: "symbol",
         source: CHECKPOINT_SOURCE,
-        minzoom: 4,
+        minzoom: 2,
         filter: ["all", ["==", ["get", "risk_label"], "Low"], ["!=", ["get", "demo_marker"], true]],
         layout: {
           "icon-image": CHECKPOINT_ICON_NAME,
-          "icon-size": ["interpolate", ["linear"], ["zoom"], 4, 0.52, 6, 0.68, 10, 0.85],
+          "icon-size": ["interpolate", ["linear"], ["zoom"], 2, 0.36, 4, 0.52, 6, 0.68, 10, 0.85],
           "icon-allow-overlap": true,
           "icon-ignore-placement": true,
         },
@@ -626,13 +628,13 @@ export const RouteMap = forwardRef<RouteMapHandle, RouteMapProps>(function Route
           id: HEATMAP_LAYER,
           type: "heatmap",
           source: HEATMAP_SOURCE,
-          minzoom: 3,
-          maxzoom: 14,
+          minzoom: 0,
+          maxzoom: 24,
           paint: {
             "heatmap-weight": heatmapWeightExpression(0),
-            "heatmap-intensity": ["interpolate", ["linear"], ["zoom"], 3, 0.8, 6, 0.9, 8, 1.0],
+            "heatmap-intensity": ["interpolate", ["linear"], ["zoom"], 0, 0.6, 3, 0.85, 6, 1.0, 9, 1.15],
             "heatmap-radius": heatmapDensityRadiusExpression(),
-            "heatmap-opacity": 0.65,
+            "heatmap-opacity": 0.75,
             "heatmap-color": heatmapDensityColorExpression(),
           } as unknown as Record<string, unknown>,
         },
@@ -646,7 +648,8 @@ export const RouteMap = forwardRef<RouteMapHandle, RouteMapProps>(function Route
           id: HEATMAP_CIRCLE_LAYER,
           type: "circle",
           source: HEATMAP_SOURCE,
-          minzoom: 4,
+          minzoom: 2,
+          maxzoom: 24,
           filter: heatmapCircleFilter(0),
           paint: {
             "circle-radius": heatmapRadiusExpression(0),
