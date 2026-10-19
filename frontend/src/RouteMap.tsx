@@ -39,26 +39,6 @@ const DESTINATION_LAYER = "active-route-destination";
 const HEATMAP_SOURCE = "forecast-risk-points";
 const HEATMAP_LAYER = "forecast-risk-density";
 const HEATMAP_CIRCLE_LAYER = "forecast-risk-circles";
-const HEATMAP_SYMBOL_LAYER = "forecast-risk-symbols";
-
-function heatmapIconExpression(hour: number): ExpressionSpecification {
-  return [
-    "case",
-    ["==", ["at", hour, ["get", "risk_values"]], 4], riskIconName("No Travel"),
-    ["==", ["at", hour, ["get", "risk_values"]], 3], riskIconName("Severe"),
-    ["==", ["at", hour, ["get", "risk_values"]], 2], riskIconName("High"),
-    ["==", ["at", hour, ["get", "risk_values"]], 1], riskIconName("Moderate"),
-    riskIconName("Low"),
-  ] as unknown as ExpressionSpecification;
-}
-
-function heatmapSymbolFilter(hour: number): ExpressionSpecification {
-  return [
-    "all",
-    ["!=", ["at", hour, ["get", "risk_values"]], null],
-    [">", ["at", hour, ["get", "risk_values"]], 0],
-  ] as unknown as ExpressionSpecification;
-}
 
 interface HeatmapProperties {
   risk_values: (number | null)[];
@@ -386,10 +366,6 @@ export const RouteMap = forwardRef<RouteMapHandle, RouteMapProps>(function Route
         map.setPaintProperty(HEATMAP_CIRCLE_LAYER, "circle-radius", heatmapRadiusExpression(hour));
         map.setPaintProperty(HEATMAP_CIRCLE_LAYER, "circle-stroke-width", heatmapStrokeWidthExpression(hour));
       }
-      if (map.getLayer(HEATMAP_SYMBOL_LAYER)) {
-        map.setLayoutProperty(HEATMAP_SYMBOL_LAYER, "icon-image", heatmapIconExpression(hour));
-        map.setFilter(HEATMAP_SYMBOL_LAYER, heatmapSymbolFilter(hour));
-      }
       const elapsed = performance.now() - t0;
       recordSliderTiming(elapsed);
       if (perfEnabled) {
@@ -651,30 +627,11 @@ export const RouteMap = forwardRef<RouteMapHandle, RouteMapProps>(function Route
       );
     }
 
-    if (!map.getLayer(HEATMAP_SYMBOL_LAYER)) {
-      map.addLayer(
-        {
-          id: HEATMAP_SYMBOL_LAYER,
-          type: "symbol",
-          source: HEATMAP_SOURCE,
-          minzoom: 4,
-          filter: heatmapSymbolFilter(0),
-          layout: {
-            "icon-image": heatmapIconExpression(0),
-            "icon-size": ["interpolate", ["linear"], ["zoom"], 4, 0.58, 7, 0.75, 11, 0.95],
-            "icon-allow-overlap": true,
-            "icon-ignore-placement": true,
-          },
-        },
-        firstRouteLayer,
-      );
-    }
-
-    for (const obsolete of ["forecast-risk-low-circles", "forecast-risk-missing"]) {
+    for (const obsolete of ["forecast-risk-low-circles", "forecast-risk-missing", "forecast-risk-symbols"]) {
       if (map.getLayer(obsolete)) map.removeLayer(obsolete);
     }
 
-    for (const layerId of [HEATMAP_LAYER, HEATMAP_CIRCLE_LAYER, HEATMAP_SYMBOL_LAYER]) {
+    for (const layerId of [HEATMAP_LAYER, HEATMAP_CIRCLE_LAYER]) {
       if (map.getLayer(layerId)) {
         map.setLayoutProperty(layerId, "visibility", heatmapEnabled ? "visible" : "none");
       }
@@ -682,9 +639,6 @@ export const RouteMap = forwardRef<RouteMapHandle, RouteMapProps>(function Route
 
     if (map.getLayer(HEATMAP_CIRCLE_LAYER) && map.getLayer(CHECKPOINT_LAYER)) {
       map.moveLayer(HEATMAP_CIRCLE_LAYER, CHECKPOINT_LAYER);
-    }
-    if (map.getLayer(HEATMAP_SYMBOL_LAYER) && map.getLayer(CHECKPOINT_LAYER)) {
-      map.moveLayer(HEATMAP_SYMBOL_LAYER, CHECKPOINT_LAYER);
     }
 
     applyHeatmapHour(0);
