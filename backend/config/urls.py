@@ -5,6 +5,8 @@ from django.urls import URLPattern, URLResolver, re_path
 from api.views import analyze, geocode, heatmap
 from config.views import health
 
+handler400 = "config.views.json_bad_request"
+handler403 = "config.views.json_forbidden"
 handler404 = "config.views.json_not_found"
 handler500 = "config.views.json_server_error"
 

@@ -1,5 +1,6 @@
 """Views and safe error handlers that do not belong to a feature."""
 
+from django.core.exceptions import RequestDataTooBig
 from django.http import HttpRequest, JsonResponse
 from rest_framework.decorators import (
     api_view,
@@ -19,6 +20,27 @@ from rest_framework.response import Response
 def health(request: Request) -> Response:
     """Liveness check for the hosting platform. Touches nothing but the process."""
     return Response({"status": "ok"})
+
+
+def json_bad_request(request: HttpRequest, exception: Exception | None = None) -> JsonResponse:
+    """Return the documented error envelope for invalid or oversized requests."""
+    message = (
+        "Request body exceeds maximum allowed size."
+        if isinstance(exception, RequestDataTooBig)
+        else "The request could not be completed."
+    )
+    return JsonResponse(
+        {"error": {"code": "invalid_request", "message": message}},
+        status=400,
+    )
+
+
+def json_forbidden(request: HttpRequest, exception: Exception | None = None) -> JsonResponse:
+    """Return the documented error envelope for forbidden access."""
+    return JsonResponse(
+        {"error": {"code": "forbidden", "message": "Access is forbidden."}},
+        status=403,
+    )
 
 
 def json_not_found(request: HttpRequest, exception: Exception | None = None) -> JsonResponse:

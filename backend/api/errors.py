@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from django.core.exceptions import RequestDataTooBig, SuspiciousOperation
 from rest_framework.exceptions import APIException, ParseError, ValidationError
 from rest_framework.response import Response
 from rest_framework.views import exception_handler as drf_exception_handler
@@ -17,6 +18,26 @@ class APIError(APIException):
 
 
 def exception_handler(exc: Exception, context: dict[str, Any]) -> Response | None:
+    if isinstance(exc, RequestDataTooBig):
+        return Response(
+            {
+                "error": {
+                    "code": "invalid_request",
+                    "message": "Request body exceeds maximum allowed size.",
+                }
+            },
+            status=400,
+        )
+    if isinstance(exc, SuspiciousOperation):
+        return Response(
+            {
+                "error": {
+                    "code": "invalid_request",
+                    "message": "The request could not be completed.",
+                }
+            },
+            status=400,
+        )
     response = drf_exception_handler(exc, context)
     if response is None:
         return None
