@@ -15,6 +15,7 @@ import { RouteMap, type RouteMapHandle } from "./RouteMap";
 import { RISK_LEVELS, riskColorToken, type RiskLabel } from "./constants";
 import { RiskIcon } from "./RiskIcon";
 import type { AnalyzeResponse, AnalyzedRoute, Checkpoint, HeatmapResponse, RiskLevel } from "./types";
+import { SAMPLE_ANALYZE_DATA, SAMPLE_HEATMAP_DATA } from "./sampleTrip";
 import "./App.css";
 
 type IntervalMiles = 10 | 25 | 50;
@@ -711,8 +712,28 @@ export default function App() {
     }
   }
 
+  function loadSampleTrip() {
+    setOrigin({
+      label: "Salt Lake City, UT",
+      lat: 40.7608,
+      lon: -111.891,
+    });
+    setDestination({
+      label: "Provo, UT",
+      lat: 40.2338,
+      lon: -111.6585,
+    });
+    setData(SAMPLE_ANALYZE_DATA);
+    setSelectedRoute(SAMPLE_ANALYZE_DATA.recommended);
+    setTab("routes");
+    setHeatmapResponse(SAMPLE_HEATMAP_DATA);
+    setHeatmapUnavailable(false);
+    setError(null);
+  }
+
   const routes = data ? rankedRoutes(data) : [];
   const levelsDemoEnabled = import.meta.env.DEV && new URLSearchParams(window.location.search).get("demo") === "levels";
+  const sampleDemoEnabled = new URLSearchParams(window.location.search).get("demo") === "sample";
   function handleTabKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
     if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
     event.preventDefault();
@@ -798,7 +819,19 @@ export default function App() {
 
           <form className="trip-form" onSubmit={submit}>
             <section className="panel-section" aria-labelledby="trip-title">
-              <h2 id="trip-title" className="section-title">Trip</h2>
+              <div className="section-title-row">
+                <h2 id="trip-title" className="section-title">Trip</h2>
+                {sampleDemoEnabled && (
+                  <button
+                    type="button"
+                    className="sample-trip-button"
+                    onClick={loadSampleTrip}
+                    title="Load pre-computed sample route, checkpoints, and heatmap data"
+                  >
+                    Load Sample Trip
+                  </button>
+                )}
+              </div>
               <PlacePicker id="origin" label="Origin" value={origin} onChange={setOrigin} />
               <PlacePicker id="destination" label="Destination" value={destination} onChange={setDestination} />
               <label className="form-field">

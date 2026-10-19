@@ -37,6 +37,8 @@ button:focus-visible, input:focus-visible, summary:focus-visible, [role="radio"]
 .trip-form .panel-section { gap: var(--space-2); padding: var(--space-3) var(--space-4); }
 .section-title, .section-title-row h2 { margin: 0; color: var(--text); font-size: var(--font-14); font-weight: var(--weight-semibold); line-height: var(--line-tight); }
 .section-title-row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
+.sample-trip-button { display: inline-flex; align-items: center; gap: 4px; padding: 3px 10px; font-size: 11px; font-weight: var(--weight-semibold); color: var(--primary); background: var(--selected-bg); border: 1px solid var(--primary); border-radius: var(--radius-pill); cursor: pointer; transition: all 120ms ease; }
+.sample-trip-button:hover { background: var(--divider); }
 .route-count { color: var(--muted); font-size: var(--font-12); }
 .form-field, .place-picker { position: relative; display: grid; gap: var(--space-1); min-width: 0; }
 .field-label { display: flex; align-items: center; gap: var(--space-2); color: var(--muted); font-size: var(--font-12); font-weight: var(--weight-medium); }
