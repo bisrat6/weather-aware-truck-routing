@@ -332,6 +332,81 @@ def test_rate_limit_without_retry_after(fake_http):
     assert info.value.retry_after is None
 
 
+def test_rate_limit_retries_then_succeeds(fake_http, monkeypatch):
+    responses = iter(
+        [
+            FakeResponse(429, {"error": True, "reason": "busy"}),
+            FakeResponse(429, {"error": True, "reason": "still busy"}),
+            FakeResponse(200, load_fixture()[0]),
+        ]
+    )
+    fake_http.responder = lambda params: next(responses)
+    delays = []
+    monkeypatch.setattr(client.time, "sleep", delays.append)
+
+    (series,) = fetch_hourly([(40.7, -111.9)], forecast_days=1)
+
+    assert len(series.times) == 48
+    assert fake_http.count == 3
+    assert delays == [1.0, 2.0]
+
+
+def test_rate_limit_honours_retry_after_when_it_fits_budget(fake_http, monkeypatch):
+    responses = iter(
+        [
+            FakeResponse(429, {"error": True, "reason": "busy"}, headers={"Retry-After": "4"}),
+            FakeResponse(200, load_fixture()[0]),
+        ]
+    )
+    fake_http.responder = lambda params: next(responses)
+    delays = []
+    monkeypatch.setattr(client.time, "sleep", delays.append)
+
+    fetch_hourly([(40.7, -111.9)], forecast_days=1)
+
+    assert fake_http.count == 2
+    assert delays == [4.0]
+
+
+def test_rate_limit_exhaustion_keeps_retry_hint_and_sanitizes_logs(fake_http, monkeypatch, caplog):
+    sensitive_reason = "https://weather.example/v1?latitude=40.7&longitude=-111.9&token=secret"
+    responses = iter(
+        [
+            FakeResponse(
+                429,
+                {"error": True, "reason": sensitive_reason},
+                headers={"Retry-After": "2"},
+            )
+            for _ in range(3)
+        ]
+    )
+    fake_http.responder = lambda params: next(responses)
+    delays = []
+    monkeypatch.setattr(client.time, "sleep", delays.append)
+
+    with pytest.raises(WeatherRateLimitError) as info:
+        fetch_hourly([(40.7, -111.9)], forecast_days=1)
+
+    assert fake_http.count == 3
+    assert delays == [2.0, 2.0]
+    assert info.value.retry_after == 2.0
+    combined = caplog.text + str(info.value)
+    assert "weather.example" not in combined
+    assert "40.7" not in combined
+    assert "-111.9" not in combined
+    assert "secret" not in combined
+    assert "status=429" in caplog.text
+    assert "provider=Open-Meteo" in caplog.text
+
+
+@pytest.mark.parametrize(
+    ("header", "expected"),
+    [("0", 0.0), ("2.5", 2.5), ("-1", None), ("not-a-delay", None)],
+)
+def test_retry_after_header_parsing(header, expected):
+    assert client._retry_after_seconds(header) == expected
+
+
 def test_request_error_carries_status_and_provider_reason(fake_http):
     fake_http.respond_with(
         FakeResponse(400, {"error": True, "reason": "forecast_days out of range"})

@@ -11,9 +11,13 @@ guide uses sustained 10 m wind.
 
 from __future__ import annotations
 
+import logging
 import math
+import re
+import time
 from collections.abc import Sequence
 from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
 
 import requests
 
@@ -48,6 +52,16 @@ DEFAULT_TIMEOUT: tuple[float, float] = (5.0, 20.0)  # (connect, read) seconds
 # the docs), so both spellings are accepted.
 _ACCEPTED_WIND_UNITS = frozenset({"mp/h", "mph"})
 _REASON_LIMIT = 300
+_LOG_REASON_LIMIT = 200
+_RATE_LIMIT_RETRIES = 2
+_RATE_LIMIT_BUDGET_SECONDS = 6.0
+_RATE_LIMIT_BACKOFF_SECONDS = 1.0
+_URL_PATTERN = re.compile(r"https?://\S+", re.IGNORECASE)
+_SENSITIVE_PARAMETER_PATTERN = re.compile(
+    r"\b(?:access_token|api[_-]?key|token|key|latitude|longitude|lat|lon)=[^\s&]+",
+    re.IGNORECASE,
+)
+logger = logging.getLogger(__name__)
 
 
 def _fmt(value: float) -> str:
@@ -87,8 +101,43 @@ def _reason(response: requests.Response) -> str:
     except ValueError:
         body = None
     if isinstance(body, dict) and isinstance(body.get("reason"), str):
-        return body["reason"][:_REASON_LIMIT]
-    return (response.text or "")[:_REASON_LIMIT]
+        raw = body["reason"]
+    else:
+        raw = response.text or ""
+    return _safe_reason(raw)[:_REASON_LIMIT]
+
+
+def _safe_reason(reason: str) -> str:
+    """Keep useful provider text while removing URLs, credentials, and coordinates."""
+    without_urls = _URL_PATTERN.sub("[redacted-url]", reason)
+    return _SENSITIVE_PARAMETER_PATTERN.sub("[redacted]", without_urls)
+
+
+def _retry_after_seconds(value: str | None) -> float | None:
+    """Read an HTTP Retry-After delta or date; unusable and past values have no hint."""
+    if not value:
+        return None
+    try:
+        seconds = float(value)
+    except ValueError:
+        try:
+            retry_at = parsedate_to_datetime(value)
+        except (TypeError, ValueError, IndexError):
+            return None
+        if retry_at.tzinfo is None:
+            retry_at = retry_at.replace(tzinfo=UTC)
+        seconds = (retry_at.astimezone(UTC) - datetime.now(UTC)).total_seconds()
+    return seconds if math.isfinite(seconds) and seconds >= 0 else None
+
+
+def _log_rate_limit(response: requests.Response, retry_after: float | None) -> None:
+    logger.warning(
+        "weather provider rate limited provider=%s status=%s retry_after=%s reason=%s",
+        "Open-Meteo",
+        response.status_code,
+        retry_after,
+        _reason(response)[:_LOG_REASON_LIMIT],
+    )
 
 
 def fetch_raw(
@@ -103,22 +152,39 @@ def fetch_raw(
     not chained, and no message contains the request URL.
     """
     params = build_params(points, forecast_days)
-    try:
-        response = requests.get(BASE_URL, params=params, timeout=timeout)
-    except requests.Timeout:
-        raise WeatherTimeoutError(f"Open-Meteo request timed out (timeout={timeout})") from None
-    except requests.RequestException as exc:
-        raise WeatherConnectionError(f"could not reach Open-Meteo ({type(exc).__name__})") from None
-
-    status = response.status_code
-    if status == 429:
+    started_at = time.monotonic()
+    rate_limit_attempt = 0
+    while True:
         try:
-            retry_after: float | None = float(response.headers.get("Retry-After", ""))
-        except ValueError:
-            retry_after = None
-        raise WeatherRateLimitError(
-            f"Open-Meteo rate limit exceeded: {_reason(response)}", retry_after=retry_after
-        )
+            response = requests.get(BASE_URL, params=params, timeout=timeout)
+        except requests.Timeout:
+            raise WeatherTimeoutError(f"Open-Meteo request timed out (timeout={timeout})") from None
+        except requests.RequestException as exc:
+            message = f"could not reach Open-Meteo ({type(exc).__name__})"
+            raise WeatherConnectionError(message) from None
+
+        status = response.status_code
+        if status != 429:
+            break
+
+        retry_after = _retry_after_seconds(response.headers.get("Retry-After"))
+        _log_rate_limit(response, retry_after)
+        if rate_limit_attempt >= _RATE_LIMIT_RETRIES:
+            raise WeatherRateLimitError(
+                f"Open-Meteo rate limit exceeded: {_reason(response)}", retry_after=retry_after
+            )
+
+        elapsed = time.monotonic() - started_at
+        remaining = _RATE_LIMIT_BUDGET_SECONDS - elapsed
+        if remaining <= 0:
+            raise WeatherRateLimitError(
+                f"Open-Meteo rate limit exceeded: {_reason(response)}", retry_after=retry_after
+            )
+        backoff = _RATE_LIMIT_BACKOFF_SECONDS * 2**rate_limit_attempt
+        delay = min(retry_after if retry_after is not None else backoff, remaining)
+        time.sleep(delay)
+        rate_limit_attempt += 1
+
     if status >= 500:
         raise WeatherServerError(
             f"Open-Meteo returned HTTP {status}: {_reason(response)}", status_code=status

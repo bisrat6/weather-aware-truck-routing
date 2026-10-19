@@ -9,4 +9,5 @@ def fake_http(monkeypatch):
     """Replace requests.get inside weather.client; any real network call would be a bug."""
     http = FakeHttp()
     monkeypatch.setattr(client.requests, "get", http)
+    monkeypatch.setattr(client.time, "sleep", lambda seconds: None)
     return http
