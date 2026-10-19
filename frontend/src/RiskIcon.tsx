@@ -3,8 +3,9 @@ import type { Map as MapLibreMap } from "maplibre-gl";
 
 const CIRCLE_PATH = "M12 3.5a8.5 8.5 0 1 0 0 17a8.5 8.5 0 1 0 0-17";
 export const DESTINATION_ICON_NAME = "route-destination-pin";
+export const CHECKPOINT_ICON_NAME = "route-checkpoint-pin";
 const SHAPE_PATHS: Record<Exclude<RiskShape, "missing">, string[]> = {
-  circle: [CIRCLE_PATH],
+  "circle-check": ["M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0Z", "m9 12 2 2 4-4"],
   "circle-alert": ["M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0Z", "M12 8v4", "M12 16h.01"],
   "triangle-alert": ["m10.3 3.86-8.1 14a2 2 0 0 0 1.74 3h16.12a2 2 0 0 0 1.74-3l-8.1-14a2 2 0 0 0-3.4 0Z", "M12 9v4", "M12 17h.01"],
   "shield-alert": ["M12 22s8-4 8-11V5l-8-3-8 3v6c0 7 8 11 8 11Z", "M12 8v4", "M12 16h.01"],
@@ -38,12 +39,6 @@ export function registerRiskIcons(map: MapLibreMap): void {
     context.strokeStyle = "#ffffff";
     context.lineWidth = style.shape === "missing" || style.shape === "cross" ? 6 : 5;
     for (const path of paths) context.stroke(path);
-    if (style.shape === "circle") {
-      context.fillStyle = "#ffffff";
-      context.fill(paths[0]);
-      context.fillStyle = color;
-      context.fill(paths[0]);
-    }
     context.strokeStyle = color;
     context.lineWidth = style.shape === "missing" || style.shape === "cross" ? 3 : 2.2;
     for (const path of paths) context.stroke(path);
@@ -60,6 +55,47 @@ export function registerRiskIcons(map: MapLibreMap): void {
     } else {
       map.addImage(name, image, { pixelRatio: 2 });
     }
+  }
+}
+
+
+export function registerCheckpointIcon(map: MapLibreMap): void {
+  const canvas = document.createElement("canvas");
+  canvas.width = 48;
+  canvas.height = 48;
+  const context = canvas.getContext("2d");
+  if (!context) return;
+  context.scale(2, 2);
+  const primary = getThemeToken("--primary") || "#1f5faa";
+
+  // Outer shadow & white rim
+  context.beginPath();
+  context.arc(12, 12, 8.5, 0, Math.PI * 2);
+  context.fillStyle = "#ffffff";
+  context.shadowColor = "rgba(0, 0, 0, 0.35)";
+  context.shadowBlur = 4;
+  context.shadowOffsetY = 1.5;
+  context.fill();
+
+  context.shadowColor = "transparent";
+
+  // System primary brand circle
+  context.beginPath();
+  context.arc(12, 12, 7, 0, Math.PI * 2);
+  context.fillStyle = primary;
+  context.fill();
+
+  // White inner center target dot
+  context.beginPath();
+  context.arc(12, 12, 2.6, 0, Math.PI * 2);
+  context.fillStyle = "#ffffff";
+  context.fill();
+
+  const image = context.getImageData(0, 0, canvas.width, canvas.height);
+  if (map.hasImage(CHECKPOINT_ICON_NAME)) {
+    map.updateImage(CHECKPOINT_ICON_NAME, image);
+  } else {
+    map.addImage(CHECKPOINT_ICON_NAME, image, { pixelRatio: 2 });
   }
 }
 
@@ -105,10 +141,8 @@ export function RiskIcon({ level, className }: { level: RiskLabel; className?: s
         </>
       ) : style.shape === "cross" ? (
         paths.map((path, index) => <path key={`cross-${index}`} d={path} fill="none" stroke={color} strokeWidth="2.6" strokeLinecap="round" />)
-      ) : style.shape === "circle" ? (
-        <path d={paths[0]} fill={color} stroke={color} strokeWidth="1.5" />
       ) : (
-        paths.map((path, index) => <path key={`icon-${index}`} d={path} fill="none" stroke={color} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />)
+        paths.map((path, index) => <path key={`icon-${index}`} d={path} fill="none" stroke={color} strokeWidth={index === 0 ? "2" : "2.4"} strokeLinejoin="round" strokeLinecap="round" />)
       )}
     </svg>
   );

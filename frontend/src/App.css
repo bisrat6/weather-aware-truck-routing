@@ -102,6 +102,8 @@ button:focus-visible, input:focus-visible, summary:focus-visible, [role="radio"]
 .risk-icon { display: inline-block; flex: 0 0 auto; width: 18px; height: 18px; vertical-align: middle; }
 .risk-badge__symbol { width: 16px; height: 16px; }
 .route-card__heading .risk-badge { margin-left: auto; }
+.route-card__peak-badge { display: inline-flex; align-items: center; gap: var(--space-1); margin-left: auto; }
+.route-card__peak-caption { color: var(--muted); font-size: 10px; font-weight: var(--weight-semibold); text-transform: uppercase; letter-spacing: 0.04em; }
 .route-card__provider { color: var(--link); font-size: var(--font-12); }
 .route-card__metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-2); color: var(--muted); }
 .route-card__metric { display: flex; align-items: center; gap: var(--space-2); min-width: 0; padding: var(--space-2); background: color-mix(in srgb, var(--surface) 72%, transparent); border: 1px solid var(--divider); border-radius: var(--radius-small); }
@@ -109,6 +111,15 @@ button:focus-visible, input:focus-visible, summary:focus-visible, [role="radio"]
 .route-card__metric small { color: var(--muted); font-size: 10px; line-height: 1; }
 .route-card__metric strong { overflow: hidden; color: var(--text); font-size: var(--font-12); font-weight: var(--weight-semibold); text-overflow: ellipsis; white-space: nowrap; }
 .route-card__metric svg { flex: 0 0 auto; color: var(--quiet); }
+.route-card__forecast-section { display: grid; gap: var(--space-1); padding: var(--space-2); background: color-mix(in srgb, var(--surface) 60%, transparent); border: 1px solid var(--divider); border-radius: var(--radius-small); }
+.route-card__forecast-label { color: var(--muted); font-size: 10px; font-weight: var(--weight-semibold); text-transform: uppercase; letter-spacing: 0.04em; }
+.route-card__forecast-strip { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-2); align-items: center; }
+.route-card__forecast-chip { display: inline-flex; align-items: center; gap: var(--space-1); padding: 2px 7px; font-size: var(--font-12); color: var(--text); background: var(--surface); border: 1px solid var(--divider); border-radius: var(--radius-pill); }
+.route-card__forecast-chip strong { font-weight: var(--weight-semibold); }
+.route-card__forecast-chip--missing { color: var(--warning-text); border-color: color-mix(in srgb, var(--warning-text) 30%, transparent); }
+.route-card__weather-peaks { display: flex; flex-wrap: wrap; gap: var(--space-1); margin-top: 2px; }
+.weather-peak-pill { display: inline-block; padding: 1px 6px; font-size: 11px; color: var(--muted); background: var(--footer-bg); border-radius: var(--radius-small); }
+.weather-peak-pill strong { color: var(--text); font-weight: var(--weight-medium); }
 .route-card__risk-miles { display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-3); color: var(--muted); font-size: var(--font-12); }
 .route-card__risk-miles > span:not(.route-card__missing) { display: inline-flex; align-items: center; gap: var(--space-1); }
 .route-card__risk-miles strong { color: var(--text); font-weight: var(--weight-semibold); }

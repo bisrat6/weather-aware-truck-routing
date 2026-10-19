@@ -326,28 +326,80 @@ function LoadBar({ value, onChange }: { value: string; onChange: (value: string)
   );
 }
 
+const RISK_ORDER: RiskLevel[] = ["No Travel", "Severe", "High", "Moderate", "Low"];
+
+function buildRecommendationExplanation(
+  route: AnalyzedRoute,
+  allRoutes: AnalyzedRoute[],
+  baseReason: string,
+): string {
+  const otherRoutes = allRoutes
+    .filter((r) => r.route_index !== route.route_index)
+    .sort((a, b) => a.route_index - b.route_index);
+
+  if (otherRoutes.length === 0) return baseReason;
+
+  const durationComparisons = otherRoutes.map((other) => {
+    const diffMinutes = Math.round((other.duration_s - route.duration_s) / 60);
+    const otherName = `Route ${other.route_index + 1}`;
+    if (diffMinutes > 0) return `${diffMinutes} min shorter than ${otherName}`;
+    if (diffMinutes < 0) return `${Math.abs(diffMinutes)} min longer than ${otherName}`;
+    return `same drive time as ${otherName}`;
+  });
+
+  const joinedComparisons =
+    durationComparisons.length === 1
+      ? durationComparisons[0]
+      : durationComparisons.slice(0, -1).join(", ") + " and " + durationComparisons[durationComparisons.length - 1];
+
+  const trimmed = baseReason.trim().replace(/[.!?]+$/, "");
+  const weatherPrefixMatch = trimmed.match(/^(.*?\bfewer\b.*?miles|.*?\btie\b.*?risk)/i);
+  if (weatherPrefixMatch) {
+    const weatherPrefix = weatherPrefixMatch[0].replace(/,\s*\d+\s*min\s*(shorter|longer).*$/i, "");
+    return `${weatherPrefix} · ${joinedComparisons}`;
+  }
+
+  if (/\b(shorter|longer|duration|drive time)\b/i.test(trimmed)) {
+    return joinedComparisons;
+  }
+
+  return `${trimmed} (${joinedComparisons})`;
+}
+
 function RouteCard({
   route,
   recommended,
   selected,
   recommendationReason,
-  nextRankedRoute,
+  allRoutes,
   onSelect,
 }: {
   route: AnalyzedRoute;
   recommended: boolean;
   selected: boolean;
   recommendationReason: string;
-  nextRankedRoute: AnalyzedRoute | undefined;
+  allRoutes: AnalyzedRoute[];
   onSelect: () => void;
 }) {
   const level = getRiskLabel(route.summary.max_level);
-  const hasHighRiskMiles = route.summary.miles_by_level.Severe > 0 || route.summary.miles_by_level.High > 0;
   const hasMissingWeather = route.summary.missing_weather_count > 0;
-  let explanation = recommended ? recommendationReason : "";
-  if (recommended && nextRankedRoute && /\b(shorter|longer)[.!?]*$/i.test(recommendationReason.trim())) {
-    explanation = `${recommendationReason.trim().replace(/[.!?]+$/, "")} than Route ${nextRankedRoute.route_index + 1}`;
+  const explanation = recommended ? buildRecommendationExplanation(route, allRoutes, recommendationReason) : "";
+
+  const activeRiskLevels = RISK_ORDER.filter(
+    (lvl) => (route.summary.miles_by_level[lvl] ?? 0) > 0.1,
+  );
+
+  let maxWind = 0;
+  let maxRain = 0;
+  let maxSnow = 0;
+  for (const cp of route.checkpoints) {
+    if (cp.weather) {
+      if (cp.weather.wind_mph > maxWind) maxWind = cp.weather.wind_mph;
+      if (cp.weather.rain_in_hr > maxRain) maxRain = cp.weather.rain_in_hr;
+      if (cp.weather.snow_in_hr > maxSnow) maxSnow = cp.weather.snow_in_hr;
+    }
   }
+  const hasSignificantWeather = maxWind >= 20 || maxRain >= 0.05 || maxSnow >= 0.05;
 
   return (
     <li className="timeline-item">
@@ -363,7 +415,10 @@ function RouteCard({
         <span className="route-card__heading">
           <span className="route-card__name">{routeTitle(route)}</span>
           {recommended && <span className="recommended-pill">Recommended</span>}
-          <RiskBadge level={level} />
+          <span className="route-card__peak-badge">
+            <span className="route-card__peak-caption">Peak risk</span>
+            <RiskBadge level={level} />
+          </span>
         </span>
         <span className="route-card__provider">Truck route from HERE</span>
         <span className="route-card__metrics">
@@ -376,19 +431,39 @@ function RouteCard({
             <span><small>Drive time</small><strong>{formatDuration(route.duration_s)}</strong></span>
           </span>
         </span>
-        {(hasHighRiskMiles || hasMissingWeather) && (
-          <span className="route-card__risk-miles">
-            {hasHighRiskMiles && (
-              <>
-                <span><RiskIcon level="Severe" className="risk-icon route-card__risk-icon" />Severe <strong>{formatMiles(route.summary.miles_by_level.Severe)}</strong></span>
-                <span><RiskIcon level="High" className="risk-icon route-card__risk-icon" />High <strong>{formatMiles(route.summary.miles_by_level.High)}</strong></span>
-              </>
+
+        <div className="route-card__forecast-section">
+          <span className="route-card__forecast-label">Forecast breakdown</span>
+          <div className="route-card__forecast-strip" aria-label="Forecast conditions by risk">
+            {activeRiskLevels.length > 0 ? (
+              activeRiskLevels.map((lvl) => (
+                <span key={lvl} className="route-card__forecast-chip" style={riskStyle(lvl)}>
+                  <RiskIcon level={lvl} className="risk-icon route-card__risk-icon" />
+                  <span>{lvl} <strong>{formatMiles(route.summary.miles_by_level[lvl])}</strong></span>
+                </span>
+              ))
+            ) : (
+              <span className="route-card__forecast-chip" style={riskStyle("Low")}>
+                <RiskIcon level="Low" className="risk-icon route-card__risk-icon" />
+                <span>Low <strong>{formatMiles(route.distance_mi)}</strong></span>
+              </span>
             )}
             {hasMissingWeather && (
-              <span className="route-card__missing">Weather missing · {formatMiles(route.summary.missing_weather_miles)} · {formatCheckpointCount(route.summary.missing_weather_count)}</span>
+              <span className="route-card__forecast-chip route-card__forecast-chip--missing">
+                <RiskIcon level="No data" className="risk-icon route-card__risk-icon" />
+                <span>Missing <strong>{formatMiles(route.summary.missing_weather_miles)}</strong></span>
+              </span>
             )}
-          </span>
-        )}
+          </div>
+          {hasSignificantWeather && (
+            <div className="route-card__weather-peaks" aria-label="Peak route weather">
+              {maxWind >= 20 && <span className="weather-peak-pill">Wind up to <strong>{Math.round(maxWind)} mph</strong></span>}
+              {maxRain >= 0.05 && <span className="weather-peak-pill">Rain up to <strong>{maxRain.toFixed(2)} in/hr</strong></span>}
+              {maxSnow >= 0.05 && <span className="weather-peak-pill">Snow up to <strong>{maxSnow.toFixed(2)} in/hr</strong></span>}
+            </div>
+          )}
+        </div>
+
         {explanation && <span className="route-card__reason">{explanation}</span>}
         <span className="route-card__footer">
           <span>
@@ -609,8 +684,6 @@ export default function App() {
   }
 
   const routes = data ? rankedRoutes(data) : [];
-  const recommendedPosition = routes.findIndex((route) => route.route_index === data?.recommended);
-  const nextRankedRoute = recommendedPosition >= 0 ? routes[recommendedPosition + 1] : undefined;
   const levelsDemoEnabled = import.meta.env.DEV && new URLSearchParams(window.location.search).get("demo") === "levels";
   function handleTabKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
     if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
@@ -745,7 +818,7 @@ export default function App() {
                         recommended={route.route_index === data.recommended}
                         selected={route.route_index === (selectedRoute ?? data.recommended)}
                         recommendationReason={data.recommendation_reason}
-                        nextRankedRoute={nextRankedRoute}
+                        allRoutes={routes}
                         onSelect={() => setSelectedRoute(route.route_index)}
                       />
                     ))}

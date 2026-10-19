@@ -19,7 +19,16 @@ import {
   type RiskLabel,
 } from "./constants";
 import type { AnalyzedRoute, Checkpoint, HeatmapResponse, RiskLevel } from "./types";
-import { DESTINATION_ICON_NAME, registerDestinationIcon, registerRiskIcons, riskIconName, RiskIcon } from "./RiskIcon";
+import {
+  CHECKPOINT_ICON_NAME,
+  DESTINATION_ICON_NAME,
+  registerCheckpointIcon,
+  registerDestinationIcon,
+  registerRiskIcons,
+  riskIconName,
+  RiskIcon,
+} from "./RiskIcon";
+
 
 const CHECKPOINT_SOURCE = "active-route-checkpoints";
 const CHECKPOINT_LAYER = "checkpoint-risk-markers";
@@ -30,6 +39,26 @@ const DESTINATION_LAYER = "active-route-destination";
 const HEATMAP_SOURCE = "forecast-risk-points";
 const HEATMAP_LAYER = "forecast-risk-density";
 const HEATMAP_CIRCLE_LAYER = "forecast-risk-circles";
+const HEATMAP_SYMBOL_LAYER = "forecast-risk-symbols";
+
+function heatmapIconExpression(hour: number): ExpressionSpecification {
+  return [
+    "case",
+    ["==", ["at", hour, ["get", "risk_values"]], 4], riskIconName("No Travel"),
+    ["==", ["at", hour, ["get", "risk_values"]], 3], riskIconName("Severe"),
+    ["==", ["at", hour, ["get", "risk_values"]], 2], riskIconName("High"),
+    ["==", ["at", hour, ["get", "risk_values"]], 1], riskIconName("Moderate"),
+    riskIconName("Low"),
+  ] as unknown as ExpressionSpecification;
+}
+
+function heatmapSymbolFilter(hour: number): ExpressionSpecification {
+  return [
+    "all",
+    ["!=", ["at", hour, ["get", "risk_values"]], null],
+    [">", ["at", hour, ["get", "risk_values"]], 0],
+  ] as unknown as ExpressionSpecification;
+}
 
 interface HeatmapProperties {
   risk_values: (number | null)[];
@@ -58,10 +87,10 @@ function heatmapWeightExpression(hour: number): ExpressionSpecification {
   return [
     "case",
     ["==", ["at", hour, ["get", "risk_values"]], null], 0,
-    ["==", ["at", hour, ["get", "risk_values"]], 0], 0.05,
-    ["==", ["at", hour, ["get", "risk_values"]], 1], 0.3,
-    ["==", ["at", hour, ["get", "risk_values"]], 2], 0.6,
-    ["==", ["at", hour, ["get", "risk_values"]], 3], 0.85,
+    ["==", ["at", hour, ["get", "risk_values"]], 0], 0.02,
+    ["==", ["at", hour, ["get", "risk_values"]], 1], 0.45,
+    ["==", ["at", hour, ["get", "risk_values"]], 2], 0.75,
+    ["==", ["at", hour, ["get", "risk_values"]], 3], 0.95,
     ["==", ["at", hour, ["get", "risk_values"]], 4], 1.0,
     0,
   ] as unknown as ExpressionSpecification;
@@ -79,6 +108,51 @@ function heatmapColorExpression(hour: number): ExpressionSpecification {
     getRiskColor("No data"),
   ] as unknown as ExpressionSpecification;
 }
+
+function heatmapRadiusExpression(hour: number): ExpressionSpecification {
+  return [
+    "interpolate",
+    ["linear"],
+    ["zoom"],
+    4,
+    [
+      "case",
+      ["==", ["at", hour, ["get", "risk_values"]], 4], 8.0,
+      ["==", ["at", hour, ["get", "risk_values"]], 3], 7.0,
+      ["==", ["at", hour, ["get", "risk_values"]], 2], 6.0,
+      ["==", ["at", hour, ["get", "risk_values"]], 1], 4.8,
+      2.5,
+    ],
+    7,
+    [
+      "case",
+      ["==", ["at", hour, ["get", "risk_values"]], 4], 12.0,
+      ["==", ["at", hour, ["get", "risk_values"]], 3], 10.5,
+      ["==", ["at", hour, ["get", "risk_values"]], 2], 9.0,
+      ["==", ["at", hour, ["get", "risk_values"]], 1], 7.0,
+      3.8,
+    ],
+    12,
+    [
+      "case",
+      ["==", ["at", hour, ["get", "risk_values"]], 4], 16.0,
+      ["==", ["at", hour, ["get", "risk_values"]], 3], 14.5,
+      ["==", ["at", hour, ["get", "risk_values"]], 2], 12.5,
+      ["==", ["at", hour, ["get", "risk_values"]], 1], 10.0,
+      5.5,
+    ],
+  ] as unknown as ExpressionSpecification;
+}
+
+function heatmapStrokeWidthExpression(hour: number): ExpressionSpecification {
+  return [
+    "case",
+    ["==", ["at", hour, ["get", "risk_values"]], null], 1.0,
+    ["==", ["at", hour, ["get", "risk_values"]], 0], 1.0,
+    2.2,
+  ] as unknown as ExpressionSpecification;
+}
+
 
 function performanceEnabled(): boolean {
   return import.meta.env.DEV && new URLSearchParams(window.location.search).get("perf") === "1";
@@ -165,7 +239,7 @@ function checkpointCollection(route: AnalyzedRoute | null, demoLevels = false): 
         properties: {
           checkpoint_index: checkpoint.index,
           risk_label: level,
-          marker_image: riskIconName(level),
+          marker_image: level === "Low" ? CHECKPOINT_ICON_NAME : riskIconName(level),
           demo_marker: demoLevels,
         },
         geometry: { type: "Point" as const, coordinates: [checkpoint.lon, checkpoint.lat] },
@@ -309,6 +383,12 @@ export const RouteMap = forwardRef<RouteMapHandle, RouteMapProps>(function Route
       }
       if (map.getLayer(HEATMAP_CIRCLE_LAYER)) {
         map.setPaintProperty(HEATMAP_CIRCLE_LAYER, "circle-color", heatmapColorExpression(hour));
+        map.setPaintProperty(HEATMAP_CIRCLE_LAYER, "circle-radius", heatmapRadiusExpression(hour));
+        map.setPaintProperty(HEATMAP_CIRCLE_LAYER, "circle-stroke-width", heatmapStrokeWidthExpression(hour));
+      }
+      if (map.getLayer(HEATMAP_SYMBOL_LAYER)) {
+        map.setLayoutProperty(HEATMAP_SYMBOL_LAYER, "icon-image", heatmapIconExpression(hour));
+        map.setFilter(HEATMAP_SYMBOL_LAYER, heatmapSymbolFilter(hour));
       }
       const elapsed = performance.now() - t0;
       recordSliderTiming(elapsed);
@@ -344,6 +424,7 @@ export const RouteMap = forwardRef<RouteMapHandle, RouteMapProps>(function Route
     if (!loaded || !map) return;
     const onStyleLoad = () => {
       registerRiskIcons(map);
+      registerCheckpointIcon(map);
       registerDestinationIcon(map);
       setStyleRevision((revision) => revision + 1);
     };
@@ -355,6 +436,7 @@ export const RouteMap = forwardRef<RouteMapHandle, RouteMapProps>(function Route
     const map = mapRef.current?.getMap();
     if (!loaded || !map) return;
     registerRiskIcons(map);
+    registerCheckpointIcon(map);
     registerDestinationIcon(map);
 
     const routeIds = new Set(routes.map((route) => String(route.route_index)));
@@ -434,11 +516,11 @@ export const RouteMap = forwardRef<RouteMapHandle, RouteMapProps>(function Route
         id: CHECKPOINT_LOW_LAYER,
         type: "symbol",
         source: CHECKPOINT_SOURCE,
-        minzoom: 6,
+        minzoom: 4,
         filter: ["all", ["==", ["get", "risk_label"], "Low"], ["!=", ["get", "demo_marker"], true]],
         layout: {
-          "icon-image": ["get", "marker_image"],
-          "icon-size": 0.42,
+          "icon-image": CHECKPOINT_ICON_NAME,
+          "icon-size": ["interpolate", ["linear"], ["zoom"], 4, 0.52, 6, 0.68, 10, 0.85],
           "icon-allow-overlap": true,
           "icon-ignore-placement": true,
         },
@@ -556,13 +638,32 @@ export const RouteMap = forwardRef<RouteMapHandle, RouteMapProps>(function Route
           id: HEATMAP_CIRCLE_LAYER,
           type: "circle",
           source: HEATMAP_SOURCE,
-          minzoom: 5,
+          minzoom: 4,
           paint: {
-            "circle-radius": ["interpolate", ["linear"], ["zoom"], 5, 3.5, 8, 5.5, 14, 8],
+            "circle-radius": heatmapRadiusExpression(0),
             "circle-color": heatmapColorExpression(0),
             "circle-stroke-color": getThemeToken("--surface"),
-            "circle-stroke-width": 1.5,
+            "circle-stroke-width": heatmapStrokeWidthExpression(0),
             "circle-opacity": 0.95,
+          },
+        },
+        firstRouteLayer,
+      );
+    }
+
+    if (!map.getLayer(HEATMAP_SYMBOL_LAYER)) {
+      map.addLayer(
+        {
+          id: HEATMAP_SYMBOL_LAYER,
+          type: "symbol",
+          source: HEATMAP_SOURCE,
+          minzoom: 4,
+          filter: heatmapSymbolFilter(0),
+          layout: {
+            "icon-image": heatmapIconExpression(0),
+            "icon-size": ["interpolate", ["linear"], ["zoom"], 4, 0.58, 7, 0.75, 11, 0.95],
+            "icon-allow-overlap": true,
+            "icon-ignore-placement": true,
           },
         },
         firstRouteLayer,
@@ -573,7 +674,7 @@ export const RouteMap = forwardRef<RouteMapHandle, RouteMapProps>(function Route
       if (map.getLayer(obsolete)) map.removeLayer(obsolete);
     }
 
-    for (const layerId of [HEATMAP_LAYER, HEATMAP_CIRCLE_LAYER]) {
+    for (const layerId of [HEATMAP_LAYER, HEATMAP_CIRCLE_LAYER, HEATMAP_SYMBOL_LAYER]) {
       if (map.getLayer(layerId)) {
         map.setLayoutProperty(layerId, "visibility", heatmapEnabled ? "visible" : "none");
       }
@@ -581,6 +682,9 @@ export const RouteMap = forwardRef<RouteMapHandle, RouteMapProps>(function Route
 
     if (map.getLayer(HEATMAP_CIRCLE_LAYER) && map.getLayer(CHECKPOINT_LAYER)) {
       map.moveLayer(HEATMAP_CIRCLE_LAYER, CHECKPOINT_LAYER);
+    }
+    if (map.getLayer(HEATMAP_SYMBOL_LAYER) && map.getLayer(CHECKPOINT_LAYER)) {
+      map.moveLayer(HEATMAP_SYMBOL_LAYER, CHECKPOINT_LAYER);
     }
 
     applyHeatmapHour(0);
