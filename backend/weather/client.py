@@ -49,7 +49,7 @@ PRECIPITATION_UNIT = "inch"
 TIMEZONE = "UTC"
 MAX_FORECAST_DAYS = 16  # documented range of forecast_days is 0-16
 MAX_POINTS_PER_REQUEST = 100  # conservative; the docs do not state a cap
-DEFAULT_TIMEOUT: tuple[float, float] = (5.0, 20.0)  # (connect, read) seconds
+DEFAULT_TIMEOUT: tuple[float, float] = (3.0, 20.0)  # (connect, read) seconds
 
 # What the API echoes back in `hourly_units`. For mph it returns "mp/h" (seen live, not in
 # the docs), so both spellings are accepted.
@@ -252,6 +252,11 @@ def fetch_raw(
             )
         except requests.RequestException as exc:
             timed_out = isinstance(exc, requests.Timeout)
+            # A connect timeout means the request never reached the server, so it is safe to
+            # retry. Read timeouts are not retried: they already cost the full read timeout.
+            retry_connect = (
+                isinstance(exc, requests.ConnectTimeout) and transient_attempt < _TRANSIENT_RETRIES
+            )
             _log_failure(
                 "WeatherTimeoutError" if timed_out else "WeatherConnectionError",
                 None,
@@ -261,7 +266,12 @@ def fetch_raw(
                 locations=len(points),
                 chunk=chunk,
                 other_in_flight=_leave_flight(),
+                will_retry=retry_connect,
             )
+            if retry_connect:
+                time.sleep(_RATE_LIMIT_BACKOFF_SECONDS * 2**transient_attempt)
+                transient_attempt += 1
+                continue
             if timed_out:
                 raise WeatherTimeoutError(
                     f"Open-Meteo request timed out (timeout={timeout})"

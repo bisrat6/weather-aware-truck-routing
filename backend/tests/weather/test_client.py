@@ -702,3 +702,54 @@ def test_invalid_json_body_is_logged(fake_http, caplog):
         fetch_hourly(POINT, forecast_days=1)
     (line,) = _failure_lines(caplog)
     assert "exception=WeatherResponseError" in line and "not valid JSON" in line
+
+
+# ------------------------------------------------------------------ connect timeouts
+
+
+def _connect_then(fake_http, monkeypatch, outcomes):
+    """requests.get that raises or returns each outcome in turn; returns the delay list."""
+    iterator = iter(outcomes)
+
+    def get(url, params=None, timeout=None, headers=None):
+        fake_http.calls.append({"url": url, "params": params})
+        item = next(iterator)
+        if isinstance(item, Exception):
+            raise item
+        return item
+
+    monkeypatch.setattr(client.requests, "get", get)
+    delays = []
+    monkeypatch.setattr(client.time, "sleep", delays.append)
+    return delays
+
+
+def test_connect_timeout_is_retried_then_succeeds(fake_http, monkeypatch, caplog):
+    delays = _connect_then(
+        fake_http,
+        monkeypatch,
+        [requests.ConnectTimeout("x"), FakeResponse(200, load_fixture()[0])],
+    )
+    (series,) = fetch_hourly(POINT, forecast_days=1)
+    assert len(series.times) == 48
+    assert fake_http.count == 2 and delays == [1.0]
+    (line,) = _failure_lines(caplog)
+    assert "reason=ConnectTimeout" in line and "retry=True" in line
+
+
+def test_connect_timeout_retries_are_exhausted_then_fail(fake_http, monkeypatch):
+    delays = _connect_then(fake_http, monkeypatch, [requests.ConnectTimeout("x")] * 3)
+    with pytest.raises(WeatherTimeoutError):
+        fetch_hourly(POINT, forecast_days=1)
+    assert fake_http.count == 3 and delays == [1.0, 2.0]
+
+
+def test_read_timeout_is_not_retried(fake_http, monkeypatch):
+    delays = _connect_then(fake_http, monkeypatch, [requests.ReadTimeout("x")] * 3)
+    with pytest.raises(WeatherTimeoutError):
+        fetch_hourly(POINT, forecast_days=1)
+    assert fake_http.count == 1 and delays == []
+
+
+def test_default_connect_timeout_is_3_seconds():
+    assert client.DEFAULT_TIMEOUT == (3.0, 20.0)
