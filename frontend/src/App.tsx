@@ -41,11 +41,12 @@ function makeStormDemo(response: HeatmapResponse): HeatmapResponse {
         const stormStrength = Math.sin(progress * Math.PI);
         const routePosition = response.points.length < 2 ? 0.5 : pointIndex / (response.points.length - 1);
         const distanceFromCenter = Math.abs(routePosition - 0.5);
-        const stormWidth = 0.015 + stormStrength * 0.16;
-        if (stormStrength > 0.12 && distanceFromCenter <= stormWidth * 0.2) return 3;
-        if (stormStrength > 0.08 && distanceFromCenter <= stormWidth * 0.55) return 2;
-        if (stormStrength > 0.05 && distanceFromCenter <= stormWidth) return 1;
-        return 0;
+        const stormWidth = 0.02 + stormStrength * 0.18;
+        if (stormStrength > 0.45 && distanceFromCenter <= stormWidth * 0.18) return 4; // No Travel
+        if (stormStrength > 0.18 && distanceFromCenter <= stormWidth * 0.4) return 3;  // Severe
+        if (stormStrength > 0.1 && distanceFromCenter <= stormWidth * 0.7) return 2;   // High
+        if (stormStrength > 0.04 && distanceFromCenter <= stormWidth) return 1;        // Moderate
+        return 0; // Low
       }),
     })),
   };
@@ -82,6 +83,7 @@ function HeatmapPanel({
   enabled,
   onEnabledChange,
   demo,
+  onToggleDemo,
 }: {
   response: HeatmapResponse | null;
   routeIndex: number | null;
@@ -92,6 +94,7 @@ function HeatmapPanel({
   enabled: boolean;
   onEnabledChange: (enabled: boolean) => void;
   demo: boolean;
+  onToggleDemo?: () => void;
 }) {
   const [hour, setHour] = useState(0);
 
@@ -126,7 +129,17 @@ function HeatmapPanel({
         <h2 id="heatmap-title" className="section-title">
           {routeIndex === null ? "Weather forecast" : `Forecast along Route ${routeIndex + 1}`}
         </h2>
-        {import.meta.env.DEV && demo && <span className="heatmap-demo-badge">DEMO DATA</span>}
+        {demo && <span className="heatmap-demo-badge">DEMO STORM</span>}
+        {response && onToggleDemo && (
+          <button
+            type="button"
+            className="demo-storm-button"
+            onClick={onToggleDemo}
+            title={demo ? "Clear simulated storm" : "Simulate moving storm across route"}
+          >
+            {demo ? "Exit demo storm" : "Simulate storm"}
+          </button>
+        )}
         <label className="heatmap-toggle">
           <input type="checkbox" checked={enabled} onChange={(event) => onEnabledChange(event.target.checked)} />
           <span>Show</span>
@@ -531,7 +544,8 @@ export default function App() {
   const [heatmapRequestedAt, setHeatmapRequestedAt] = useState<number | null>(null);
   const [heatmapRequestBytes, setHeatmapRequestBytes] = useState<number | null>(null);
   const [heatmapResponseBytes, setHeatmapResponseBytes] = useState<number | null>(null);
-  const demoHeatmap = stormDemoEnabled();
+  const [userDemoStorm, setUserDemoStorm] = useState(false);
+  const demoHeatmap = stormDemoEnabled() || userDemoStorm;
   const displayedHeatmapResponse = useMemo(
     () => heatmapResponse && demoHeatmap ? makeStormDemo(heatmapResponse) : heatmapResponse,
     [heatmapResponse, demoHeatmap],
@@ -839,6 +853,7 @@ export default function App() {
             enabled={heatmapEnabled}
             onEnabledChange={setHeatmapEnabled}
             demo={demoHeatmap}
+            onToggleDemo={() => setUserDemoStorm((prev) => !prev)}
           />
         </div>
       </aside>
