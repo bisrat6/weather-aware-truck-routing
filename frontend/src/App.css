@@ -58,6 +58,7 @@ button:focus-visible, input:focus-visible, summary:focus-visible, [role="radio"]
 .analyze-button:hover:not(:disabled) { background: var(--primary-hover); }
 .analyze-button:disabled { cursor: not-allowed; opacity: 0.56; }
 .analyze-button__spinner { width: 16px; height: 16px; flex: 0 0 16px; border: 2px solid currentColor; border-top-color: transparent; border-radius: 50%; animation: spin 900ms linear infinite; }
+.server-status { margin: 0; color: var(--muted); font-size: var(--font-12); line-height: var(--line-normal); }
 .info-note { position: relative; display: inline-grid; place-items: center; width: var(--touch-target); height: var(--touch-target); color: var(--muted); }
 .info-note summary { display: grid; width: var(--touch-target); height: var(--touch-target); place-items: center; list-style: none; border-radius: var(--radius-pill); cursor: pointer; }
 .info-note summary::-webkit-details-marker { display: none; }

@@ -1,6 +1,6 @@
 import type { AnalyzeRequest, AnalyzeResponse, GeocodeResponse, HeatmapRequest, HeatmapResponse } from "./types";
 
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000").replace(
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "").replace(
   /\/$/,
   "",
 );
@@ -25,12 +25,13 @@ async function request<T>(
   init?: RequestInit,
   externalSignal?: AbortSignal,
   onResponseBody?: (bodyText: string) => void,
+  timeoutMs = REQUEST_TIMEOUT_MS,
 ): Promise<T> {
   const controller = new AbortController();
   const abortRequest = () => controller.abort();
   if (externalSignal?.aborted) controller.abort();
   else externalSignal?.addEventListener("abort", abortRequest, { once: true });
-  const timeout = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetch(`${API_BASE_URL}${path}`, {
       ...init,
@@ -59,6 +60,9 @@ async function request<T>(
   } catch (error) {
     if (error instanceof Error && error.name === "AbortError") {
       throw new Error("The request timed out. The server may still be starting; please try again.");
+    }
+    if (error instanceof TypeError) {
+      throw new Error("The server could not be reached. Check your connection and try again.");
     }
     throw error;
   } finally {
@@ -89,4 +93,8 @@ export function heatmap(
 
 export function geocode(query: string, signal?: AbortSignal): Promise<GeocodeResponse> {
   return request<GeocodeResponse>(`/api/geocode?q=${encodeURIComponent(query)}`, undefined, signal);
+}
+
+export function health(signal?: AbortSignal): Promise<{ status: "ok" }> {
+  return request<{ status: "ok" }>("/api/health", undefined, signal, undefined, 3000);
 }

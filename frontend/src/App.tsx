@@ -9,7 +9,7 @@ import {
   Route as RouteIcon,
   Weight,
 } from "lucide-react";
-import { analyze, heatmap } from "./api";
+import { analyze, health, heatmap } from "./api";
 import { PlacePicker, type Place } from "./PlacePicker";
 import { RouteMap } from "./RouteMap";
 import { RISK_LEVELS, riskColorToken, type RiskLabel } from "./constants";
@@ -425,6 +425,8 @@ export default function App() {
   const [selectedRoute, setSelectedRoute] = useState<number | null>(null);
   const [tab, setTab] = useState<ResultsTab>("routes");
   const [loading, setLoading] = useState(false);
+  const [serverReady, setServerReady] = useState(false);
+  const [serverWaking, setServerWaking] = useState(false);
   const [waking, setWaking] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState(false);
@@ -442,6 +444,34 @@ export default function App() {
     () => heatmapResponse && demoHeatmap ? makeStormDemo(heatmapResponse) : heatmapResponse,
     [heatmapResponse, demoHeatmap],
   );
+
+  useEffect(() => {
+    let cancelled = false;
+    let retryTimer = 0;
+    let attempt = 0;
+
+    const checkServer = async () => {
+      try {
+        const response = await health();
+        if (cancelled || response.status !== "ok") return;
+        setServerReady(true);
+        setServerWaking(false);
+      } catch {
+        if (cancelled) return;
+        setServerReady(false);
+        setServerWaking(true);
+        const delay = Math.min(15_000, 1_000 * 2 ** attempt);
+        attempt += 1;
+        retryTimer = window.setTimeout(checkServer, delay);
+      }
+    };
+
+    void checkServer();
+    return () => {
+      cancelled = true;
+      window.clearTimeout(retryTimer);
+    };
+  }, []);
 
   useEffect(() => {
     if (!loading) return;
@@ -626,12 +656,17 @@ export default function App() {
                 value={String(intervalMiles)}
                 onChange={(value) => setIntervalMiles(Number(value) as IntervalMiles)}
               />
-              <button className="analyze-button" type="submit" disabled={loading || !origin || !destination} aria-busy={loading}>
+              <button className="analyze-button" type="submit" disabled={loading || !serverReady || !origin || !destination} aria-busy={loading}>
                 {loading ? "Analyzing routes…" : "Analyze routes"}
                 {loading
                   ? <span className="analyze-button__spinner" aria-hidden="true" />
                   : <RouteIcon size={16} aria-hidden="true" />}
               </button>
+              {!serverReady && (
+                <p className="server-status" role="status">
+                  {serverWaking ? "Server is waking up, this can take up to a minute." : "Checking server connection…"}
+                </p>
+              )}
             </section>
 
             <LoadBar value={loadLb} onChange={setLoadLb} />
