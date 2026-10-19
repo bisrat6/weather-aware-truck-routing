@@ -7,6 +7,9 @@ All endpoints are served by Django under `/api`. Requests and responses use JSON
 {"error": {"code": "invalid_request", "message": "A clear explanation."}}
 ```
 
+All errors—including unknown paths (404), unhandled exceptions (500), and oversized request bodies (400)—return
+this standard JSON error shape without stack traces, tokens, or upstream URLs.
+Responses with `Accept-Encoding: gzip` exceeding 200 bytes are compressed with GZip (`Content-Encoding: gzip`).
 Rate-limit errors keep the same shape and include a retry hint in `message` when the provider
 supplies one. Error messages do not include upstream URLs or credentials.
 
@@ -82,6 +85,10 @@ Response body:
 ```
 
 Each route's `geometry` uses the GeoJSON object shape `{"coordinates": [[longitude, latitude], ...]}`.
+Returned route geometry is simplified for display using the Douglas-Peucker algorithm with a default
+tolerance of 35 m (endpoints preserved exact), cutting payload size and render cost by over 90%.
+All internal route calculations (distances, durations, checkpoint placement, ETAs, risk scoring,
+and ranking) strictly continue to use the full-detail provider geometry.
 
 Geometry coordinates are GeoJSON `[longitude, latitude]`. `ranking` lists route indices in
 recommended-first order; `recommended` is the first route index. `risk_level` and `max_level`
@@ -141,8 +148,9 @@ Request body:
 
 `geometry` must use the same GeoJSON object shape returned by `/api/analyze`, with an
 ordered `coordinates` list of `[longitude, latitude]` WGS84 pairs. At least two and at most
-40,000 points are accepted; this accommodates the recorded 34,997-point Los Angeles–New
-York route (about 808 KB for a compact JSON request) while bounding request size.
+40,000 points are accepted; this accommodates both raw unsimplified routes (such as the recorded
+34,997-point Los Angeles–New York route, about 808 KB) and simplified routes (which typically contain
+~2,000–3,500 points) while bounding request size.
 `departure_utc` and `load_lb` use the same
 validation window and inclusive 0–100,000 lb range as `/api/analyze`. The service samples
 along the corridor and caps the output at 150 points. Hours are 49 consecutive UTC forecast hours;
