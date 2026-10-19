@@ -89,6 +89,40 @@ function heatmapColorExpression(hour: number): ExpressionSpecification {
   ] as unknown as ExpressionSpecification;
 }
 
+function heatmapDensityColorExpression(): ExpressionSpecification {
+  return [
+    "interpolate",
+    ["linear"],
+    ["heatmap-density"],
+    0.0, "rgba(0, 0, 0, 0)",
+    0.15, "rgba(245, 158, 11, 0.0)",
+    0.35, "rgba(217, 119, 6, 0.65)",
+    0.6, getRiskColor("High"),
+    0.85, getRiskColor("Severe"),
+    1.0, getRiskColor("No Travel"),
+  ] as unknown as ExpressionSpecification;
+}
+
+function heatmapDensityRadiusExpression(): ExpressionSpecification {
+  return [
+    "interpolate",
+    ["linear"],
+    ["zoom"],
+    3, 6,
+    5, 8,
+    7, 11,
+    9, 14,
+  ] as unknown as ExpressionSpecification;
+}
+
+function heatmapCircleFilter(hour: number): ExpressionSpecification {
+  return [
+    "all",
+    ["!=", ["at", hour, ["get", "risk_values"]], null],
+    [">", ["at", hour, ["get", "risk_values"]], 0],
+  ] as unknown as ExpressionSpecification;
+}
+
 function heatmapRadiusExpression(hour: number): ExpressionSpecification {
   return [
     "interpolate",
@@ -360,11 +394,15 @@ export const RouteMap = forwardRef<RouteMapHandle, RouteMapProps>(function Route
       const t0 = performance.now();
       if (map.getLayer(HEATMAP_LAYER)) {
         map.setPaintProperty(HEATMAP_LAYER, "heatmap-weight", heatmapWeightExpression(hour));
+        map.setPaintProperty(HEATMAP_LAYER, "heatmap-color", heatmapDensityColorExpression());
+        map.setPaintProperty(HEATMAP_LAYER, "heatmap-radius", heatmapDensityRadiusExpression());
+        map.setPaintProperty(HEATMAP_LAYER, "heatmap-opacity", 0.65);
       }
       if (map.getLayer(HEATMAP_CIRCLE_LAYER)) {
         map.setPaintProperty(HEATMAP_CIRCLE_LAYER, "circle-color", heatmapColorExpression(hour));
         map.setPaintProperty(HEATMAP_CIRCLE_LAYER, "circle-radius", heatmapRadiusExpression(hour));
         map.setPaintProperty(HEATMAP_CIRCLE_LAYER, "circle-stroke-width", heatmapStrokeWidthExpression(hour));
+        map.setFilter(HEATMAP_CIRCLE_LAYER, heatmapCircleFilter(hour));
       }
       const elapsed = performance.now() - t0;
       recordSliderTiming(elapsed);
@@ -590,18 +628,10 @@ export const RouteMap = forwardRef<RouteMapHandle, RouteMapProps>(function Route
           maxzoom: 8,
           paint: {
             "heatmap-weight": heatmapWeightExpression(0),
-            "heatmap-intensity": ["interpolate", ["linear"], ["zoom"], 3, 0.85, 6, 1.0, 8, 1.0],
-            "heatmap-radius": ["interpolate", ["linear"], ["zoom"], 3, 14, 6, 16, 8, 14],
-            "heatmap-opacity": 0.5,
-            "heatmap-color": [
-              "interpolate", ["linear"], ["heatmap-density"],
-              0, "rgba(0,0,0,0)",
-              0.25, "rgba(217, 119, 6, 0.4)",
-              0.5, getRiskColor("Moderate"),
-              0.7, getRiskColor("High"),
-              0.88, getRiskColor("Severe"),
-              1, getRiskColor("No Travel"),
-            ],
+            "heatmap-intensity": ["interpolate", ["linear"], ["zoom"], 3, 0.8, 6, 0.9, 8, 1.0],
+            "heatmap-radius": heatmapDensityRadiusExpression(),
+            "heatmap-opacity": 0.65,
+            "heatmap-color": heatmapDensityColorExpression(),
           } as unknown as Record<string, unknown>,
         },
         firstRouteLayer,
@@ -615,6 +645,7 @@ export const RouteMap = forwardRef<RouteMapHandle, RouteMapProps>(function Route
           type: "circle",
           source: HEATMAP_SOURCE,
           minzoom: 4,
+          filter: heatmapCircleFilter(0),
           paint: {
             "circle-radius": heatmapRadiusExpression(0),
             "circle-color": heatmapColorExpression(0),
