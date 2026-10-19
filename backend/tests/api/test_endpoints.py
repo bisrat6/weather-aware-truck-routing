@@ -399,3 +399,21 @@ def test_cors_allows_only_configured_frontend_origin(client, monkeypatch):
         denied = client.get("/api/health", HTTP_ORIGIN="https://other.example")
     assert allowed.headers["Access-Control-Allow-Origin"] == "https://frontend.example"
     assert "Access-Control-Allow-Origin" not in denied.headers
+
+
+def test_gzip_compression_returns_identical_json_payload(client, monkeypatch):
+    import gzip
+
+    mock_both_providers(monkeypatch)
+    uncompressed = client.post("/api/analyze", body(), format="json")
+    assert uncompressed.status_code == 200
+    assert "gzip" not in uncompressed.get("Content-Encoding", "")
+
+    compressed = client.post("/api/analyze", body(), format="json", HTTP_ACCEPT_ENCODING="gzip")
+    assert compressed.status_code == 200
+    assert compressed["Content-Encoding"] == "gzip"
+    assert "Accept-Encoding" in compressed["Vary"]
+
+    decompressed_bytes = gzip.decompress(compressed.content)
+    assert json.loads(decompressed_bytes.decode("utf-8")) == uncompressed.json()
+
