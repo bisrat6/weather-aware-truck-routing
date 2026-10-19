@@ -6,7 +6,9 @@
 2. Set the root directory to `backend`.
 3. Set the Python version environment variable to `PYTHON_VERSION=3.12.0`.
 4. Use build command: `pip install -r requirements.txt`.
-5. Use start command: `gunicorn config.wsgi:application --workers 1 --threads 4 --timeout 120`.
+5. Use start command: `gunicorn -c gunicorn.conf.py config.wsgi:application` (or `gunicorn config.wsgi:application --workers 1 --threads 4 --timeout 120`).
+   - **Why 1 worker with 4 threads:** The in-memory Open-Meteo weather grid cache (`GridCache`) is shared across all concurrent requests in the same process memory space, maximizing cache hits and minimizing external weather API calls. Multiple threads also minimize memory consumption on Render.
+   - **Setting on Render:** In the Render Dashboard, open your backend **Web Service** -> **Settings** -> **Build & Deploy** -> **Start Command**, enter `gunicorn -c gunicorn.conf.py config.wsgi:application`, and save changes.
 6. Add the environment variables below, then deploy.
 
 | Variable | Value |
