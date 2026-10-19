@@ -146,8 +146,8 @@ def test_analyze_happy_path_uses_recorded_fixtures_and_provider_notice(client, m
     assert "unstable_checkpoints" in data["routes"][0]["summary"]
     assert "unknown_stability_checkpoints" in data["routes"][0]["summary"]
     assert data["notices"] == [
-        f"Only {len(data['routes'])} routes available (the provider returned 2; "
-        "the detour search found 0 acceptable)"
+        "Only 2 routes available. The routing provider returned 2, "
+        "and we could not find another route that was different enough."
     ]
 
 
@@ -457,6 +457,7 @@ def test_analyze_returns_fallback_route_with_its_origin_label(client, monkeypatc
         "provider alternative",
         "avoiding motorways",
     ]
+    assert [r["source"] for r in data["routes"]] == ["provider", "provider", "generated"]
     assert sorted(data["ranking"]) == [0, 1, 2]
     assert data["notices"] == []
 
@@ -474,7 +475,8 @@ def test_analyze_still_returns_main_result_when_every_fallback_request_fails(
     data = response.json()
     assert len(data["routes"]) == 2
     assert data["notices"] == [
-        "Only 2 routes available (the provider returned 2; the detour search found 0 acceptable)"
+        "Only 2 routes available. The routing provider returned 2, "
+        "and we could not find another route that was different enough."
     ]
     assert len(directions.extra_calls) <= 5
 
@@ -494,7 +496,8 @@ def test_analyze_notice_counts_provider_and_accepted_routes(client, monkeypatch)
         "avoiding motorways",
     ]
     assert data["notices"] == [
-        "Only 2 routes available (the provider returned 1; the detour search found 1 acceptable)"
+        "Only 2 routes available. The routing provider returned 1, "
+        "and we added 1 extra route by searching for a different way to drive it."
     ]
 
 
@@ -523,3 +526,13 @@ def test_failed_fallback_does_not_change_ranking(client, monkeypatch):
     with_failed_fallback = analyze(Directions({"main": load_payload(MAIN)}, default=(500, {})))
     without_fallback = analyze(Directions({"main": load_payload(MAIN)}), patch_identity=True)
     assert with_failed_fallback == without_fallback
+
+
+def test_notice_has_no_semicolons_or_parentheses_and_pluralizes():
+    from api.views import _few_routes_notice
+
+    for total, provider in ((1, 1), (2, 2), (2, 1), (3, 1)):
+        text = _few_routes_notice(total, provider)
+        assert ";" not in text and "(" not in text
+    assert _few_routes_notice(1, 1).startswith("Only 1 route available.")
+    assert "2 extra routes" in _few_routes_notice(3, 1)

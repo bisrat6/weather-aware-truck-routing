@@ -42,6 +42,24 @@ _weather_service = WeatherService(
 )
 
 
+def _plural(count: int, word: str) -> str:
+    return f"{count} {word}" + ("" if count == 1 else "s")
+
+
+def _few_routes_notice(total: int, provider_count: int) -> str:
+    """Plain-language notice for fewer than 3 routes after the extra-route search."""
+    extra = total - provider_count
+    start = (
+        f"Only {_plural(total, 'route')} available. The routing provider returned {provider_count}"
+    )
+    if extra > 0:
+        return (
+            f"{start}, and we added {_plural(extra, 'extra route')} "
+            "by searching for a different way to drive it."
+        )
+    return f"{start}, and we could not find another route that was different enough."
+
+
 def _retry_hint(seconds: float | None) -> str:
     return f" Retry after {seconds:g} seconds." if seconds is not None else ""
 
@@ -129,11 +147,7 @@ def analyze(request: Request) -> Response:
     notices = []
     if len(routes) < 3:
         if fallback.attempted:
-            notices.append(
-                f"Only {len(routes)} routes available (the provider returned "
-                f"{fallback.provider_count}; the detour search found "
-                f"{fallback.accepted} acceptable)"
-            )
+            notices.append(_few_routes_notice(len(routes), fallback.provider_count))
         else:
             notices.append(f"Only {len(routes)} routes available from the provider")
     recommended_summary = ranking.recommended.summary

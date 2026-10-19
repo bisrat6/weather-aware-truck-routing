@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 
 from analysis.models import CheckpointResult, RouteResult
 from risk import RiskLevel
+from routing.mapbox import PROVIDER_LABEL
 from routing.models import Route
 from routing.simplify import simplify_coords
 
@@ -54,6 +55,8 @@ def serialize_route(index: int, route: Route, result: RouteResult) -> dict[str, 
     return {
         "route_index": index,
         "origin_label": route.origin_label,
+        # "provider" = returned by the routing provider; "generated" = found by our fallback.
+        "source": "provider" if route.origin_label == PROVIDER_LABEL else "generated",
         "geometry": {
             "coordinates": [[lon, lat] for lat, lon in display_coords],
         },

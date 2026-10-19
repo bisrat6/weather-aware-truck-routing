@@ -78,6 +78,7 @@ function HeatmapPanel({
   loading,
   unavailable,
   onHourChange,
+  onRetry,
   enabled,
   onEnabledChange,
   demo,
@@ -87,6 +88,7 @@ function HeatmapPanel({
   loading: boolean;
   unavailable: boolean;
   onHourChange: (hour: number) => void;
+  onRetry: () => void;
   enabled: boolean;
   onEnabledChange: (enabled: boolean) => void;
   demo: boolean;
@@ -156,7 +158,12 @@ function HeatmapPanel({
       <div className="heatmap-range-ends" aria-hidden="true"><span>Departure</span><span>+48 h</span></div>
       <p className="heatmap-explanation">The map shows weather along the route at the selected time. Route safety reflects conditions expected when the truck reaches each part of the route.</p>
       {loading && <p className="heatmap-status" role="status">Loading forecast…</p>}
-      {unavailable && <p className="heatmap-unavailable" role="status">Forecast overlay unavailable for this route</p>}
+      {unavailable && (
+        <p className="heatmap-unavailable" role="status">
+          The forecast overlay could not load. The weather service may be busy.{" "}
+          <button type="button" className="heatmap-retry" onClick={onRetry}>Try again</button>
+        </p>
+      )}
       {response && (
         <div className="heatmap-hour-summary" aria-live="polite">
           <span className="heatmap-hour-summary__label">Selected-hour forecast</span>
@@ -208,6 +215,13 @@ function RiskBadge({ level }: { level: RiskLabel }) {
 
 function routeTitle(route: AnalyzedRoute): string {
   return `Route ${route.route_index + 1}`;
+}
+
+function routeSourceText(route: AnalyzedRoute): string {
+  if (route.source === "provider") return "Route from the routing provider";
+  if (route.origin_label === "avoiding motorways") return "Extra route we generated: avoids motorways";
+  const side = route.origin_label.includes("left") ? "left" : "right";
+  return `Extra route we generated: detour to the ${side} of the main route`;
 }
 
 function rankedRoutes(data: AnalyzeResponse): AnalyzedRoute[] {
@@ -358,7 +372,14 @@ function RouteCard({
           {recommended && <span className="recommended-pill">Recommended</span>}
           <RiskBadge level={level} />
         </span>
-        <span className="route-card__provider">{route.origin_label}</span>
+        <span
+          className={`route-card__provider${route.source === "generated" ? " route-card__provider--generated" : ""}`}
+          title={route.source === "generated"
+            ? "The routing provider did not suggest this route. We asked it to route a different way, then checked the result."
+            : undefined}
+        >
+          {routeSourceText(route)}
+        </span>
         <span className="route-card__metrics">
           <span className="route-card__metric">
             <RouteIcon size={15} aria-hidden="true" />
@@ -444,6 +465,7 @@ export default function App() {
   const [heatmapResponse, setHeatmapResponse] = useState<HeatmapResponse | null>(null);
   const [heatmapLoading, setHeatmapLoading] = useState(false);
   const [heatmapUnavailable, setHeatmapUnavailable] = useState(false);
+  const [heatmapRetry, setHeatmapRetry] = useState(0);
   const [heatmapEnabled, setHeatmapEnabled] = useState(true);
   const [heatmapRequestedAt, setHeatmapRequestedAt] = useState<number | null>(null);
   const [heatmapRequestBytes, setHeatmapRequestBytes] = useState<number | null>(null);
@@ -554,7 +576,7 @@ export default function App() {
       controller.abort();
       if (heatmapController.current === controller) heatmapController.current = null;
     };
-  }, [activeRoute, heatmapContext]);
+  }, [activeRoute, heatmapContext, heatmapRetry]);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -715,7 +737,11 @@ export default function App() {
             {loading && (
               <div className="loading-state" role="status" aria-live="polite">
                 <span className="loading-state__spinner" aria-hidden="true" />
-                <span>{waking ? "Waking the server, this can take up to a minute." : "Checking route and forecast conditions…"}</span>
+                <span>{waking
+                  ? (serverReady
+                    ? "Still working: looking for extra routes and checking the forecast. This can take up to 30 seconds."
+                    : "Waking the server, this can take up to a minute.")
+                  : "Checking route and forecast conditions…"}</span>
                 <div className="loading-skeleton"><i /><i /><i /></div>
               </div>
             )}
@@ -750,6 +776,7 @@ export default function App() {
             loading={heatmapLoading}
             unavailable={heatmapUnavailable}
             onHourChange={handleHeatmapHourChange}
+            onRetry={() => setHeatmapRetry((count) => count + 1)}
             enabled={heatmapEnabled}
             onEnabledChange={setHeatmapEnabled}
             demo={demoHeatmap}
