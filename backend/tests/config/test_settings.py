@@ -17,6 +17,7 @@ ENV_VARS = (
     "DJANGO_ALLOWED_HOSTS",
     "RENDER_EXTERNAL_HOSTNAME",
     "TRUCK_TIME_FACTOR",
+    "HERE_API_KEY",
     "OPEN_METEO_BASE_URL",
     "OPEN_METEO_PROXY_TOKEN",
 )
@@ -115,7 +116,7 @@ def test_render_external_hostname_is_not_duplicated(monkeypatch):
 
 
 def test_truck_time_factor_default_and_override(monkeypatch):
-    assert load_settings(monkeypatch, DJANGO_SECRET_KEY="k").TRUCK_TIME_FACTOR == 1.1
+    assert load_settings(monkeypatch, DJANGO_SECRET_KEY="k").TRUCK_TIME_FACTOR == 1.0
     s = load_settings(monkeypatch, DJANGO_SECRET_KEY="k", TRUCK_TIME_FACTOR="1.25")
     assert s.TRUCK_TIME_FACTOR == 1.25
 
@@ -133,6 +134,12 @@ def test_open_meteo_defaults_and_optional_proxy_settings(monkeypatch):
     )
     assert configured.OPEN_METEO_BASE_URL == "https://weather-proxy.example"
     assert configured.OPEN_METEO_PROXY_TOKEN == "proxy-token"
+
+
+def test_here_api_key_defaults_and_override(monkeypatch):
+    assert load_settings(monkeypatch, DJANGO_SECRET_KEY="k").HERE_API_KEY == ""
+    s = load_settings(monkeypatch, DJANGO_SECRET_KEY="k", HERE_API_KEY="test-here-key")
+    assert s.HERE_API_KEY == "test-here-key"
 
 
 def test_repo_contains_no_real_secret_defaults():

@@ -47,7 +47,6 @@ export interface RouteSummary {
 export interface AnalyzedRoute {
   route_index: number;
   origin_label: string;
-  source: "provider" | "generated";
   geometry: GeoJSONLine;
   distance_mi: number;
   duration_s: number;

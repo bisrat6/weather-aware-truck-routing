@@ -8,7 +8,7 @@ import pytest
 from analysis import RouteResult, RouteSummary, analyze_route, rank_routes
 from risk import RiskLevel
 from routing.checkpoints import sample_checkpoints
-from routing.mapbox import parse_routes
+from routing.here import parse_routes
 from weather.models import MissingWeather, WeatherSample
 
 FIXTURES = Path(__file__).parents[1] / "fixtures"
@@ -43,7 +43,7 @@ def result(label, miles, avg=1.0, duration=1000, missing_count=0, missing_miles=
 
 
 def test_checkpoint_miles_sum_and_summary_matches_classified_checkpoints():
-    route = parse_routes(json.loads((FIXTURES / "mapbox_slc_provo.json").read_text()))[0]
+    route = parse_routes(json.loads((FIXTURES / "here_slc_provo.json").read_text()))[0]
     cps_count = math.ceil(route.cum_dist_m[-1] / 1609.344 / 25) + 1
     weather = StubWeather(
         [WeatherSample(datetime(2026, 10, 17, tzinfo=UTC), 46.0, 0.0, 0.0)] * cps_count
@@ -60,7 +60,7 @@ def test_checkpoint_miles_sum_and_summary_matches_classified_checkpoints():
 
 
 def test_summary_matches_each_mixed_risk_bucket():
-    route = parse_routes(json.loads((FIXTURES / "mapbox_slc_provo.json").read_text()))[0]
+    route = parse_routes(json.loads((FIXTURES / "here_slc_provo.json").read_text()))[0]
     n = len(sample_checkpoints(route, 5))
     winds = (10.0, 30.0, 40.0, 50.0, 70.0)
     samples = [
@@ -78,7 +78,7 @@ def test_summary_matches_each_mixed_risk_bucket():
 
 
 def test_load_changes_risk_only_via_shared_engine():
-    route = parse_routes(json.loads((FIXTURES / "mapbox_slc_provo.json").read_text()))[0]
+    route = parse_routes(json.loads((FIXTURES / "here_slc_provo.json").read_text()))[0]
     n = math.ceil(route.cum_dist_m[-1] / 1609.344 / 50) + 1
     samples = [WeatherSample(datetime(2026, 10, 17, tzinfo=UTC), 40.0, 0.0, 0.0)] * n
     depart = datetime(2026, 10, 17, tzinfo=UTC)
@@ -90,7 +90,7 @@ def test_load_changes_risk_only_via_shared_engine():
 
 
 def test_missing_weather_is_flagged_counted_and_not_scored_as_low():
-    route = parse_routes(json.loads((FIXTURES / "mapbox_slc_provo.json").read_text()))[0]
+    route = parse_routes(json.loads((FIXTURES / "here_slc_provo.json").read_text()))[0]
     n = math.ceil(route.cum_dist_m[-1] / 1609.344 / 50) + 1
     values = [WeatherSample(datetime(2026, 10, 17, tzinfo=UTC), 2, 0, 0)] * n
     values[0] = MissingWeather(None, "fixture missing", ("wind_speed_10m",))
@@ -137,7 +137,7 @@ def test_two_incomplete_routes_use_the_existing_risk_order():
 
 
 def test_entirely_missing_route_has_all_miles_unclassified_and_reason_discloses_it():
-    route = parse_routes(json.loads((FIXTURES / "mapbox_slc_provo.json").read_text()))[0]
+    route = parse_routes(json.loads((FIXTURES / "here_slc_provo.json").read_text()))[0]
     n = math.ceil(route.cum_dist_m[-1] / 1609.344 / 50) + 1
     missing = [MissingWeather(None, "fixture missing")] * n
     scored = analyze_route(
@@ -218,7 +218,7 @@ def test_full_run_uses_recorded_route_and_weather_fixture_with_mocked_http(monke
         return Response(locations if len(locations) > 1 else locations[0])
 
     monkeypatch.setattr("weather.client.requests.get", get)
-    route = parse_routes(json.loads((FIXTURES / "mapbox_slc_provo.json").read_text()))[0]
+    route = parse_routes(json.loads((FIXTURES / "here_slc_provo.json").read_text()))[0]
     service = WeatherService(now=lambda: datetime(2026, 10, 17, 1, tzinfo=UTC))
     scored = analyze_route(route, datetime(2026, 10, 17, 2, tzinfo=UTC), 25, 0, service)
     assert len(scored.checkpoints) >= 2

@@ -16,11 +16,11 @@
 | `DJANGO_SECRET_KEY` | A long, random private value. Required in production. |
 | `DJANGO_DEBUG` | `false` |
 | `DJANGO_ALLOWED_HOSTS` | Your backend hostnames, comma-separated. Render also adds its hostname through `RENDER_EXTERNAL_HOSTNAME`. |
-| `MAPBOX_TOKEN` | Server-side Mapbox token. Never add this to the frontend. |
+| `HERE_API_KEY` | Server-side HERE API key, used for routing and place search. Never add this to the frontend. |
 | `OPEN_METEO_BASE_URL` | Optional Open-Meteo host or proxy base URL; defaults to `https://api.open-meteo.com`. |
 | `OPEN_METEO_PROXY_TOKEN` | Optional proxy credential, sent server-side as the `X-Proxy-Token` header. Never add this to the frontend. |
 | `FRONTEND_ORIGIN` | Exact static-site origin, for example `https://weather-routing.onrender.com` (no trailing slash). |
-| `TRUCK_TIME_FACTOR` | Optional; defaults to `1.1`. |
+| `TRUCK_TIME_FACTOR` | Optional; defaults to `1.0` (HERE's truck mode already models truck speeds). |
 
 `RENDER_EXTERNAL_HOSTNAME` is supplied by Render when available and does not need to be set manually.
 

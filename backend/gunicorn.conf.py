@@ -16,7 +16,7 @@ bind = f"0.0.0.0:{port}"
 workers = 1
 threads = 4
 
-# Allow external Mapbox/Open-Meteo fetches without premature timeouts
+# Allow external HERE/Open-Meteo fetches without premature timeouts
 timeout = 120
 
 # Log to standard output/error

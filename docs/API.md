@@ -41,7 +41,7 @@ Response body:
   "routes": [
     {
       "route_index": 0,
-      "origin_label": "provider alternative",
+      "origin_label": "HERE route",
       "geometry": {"coordinates": [[-74.0, 40.7], [-73.9, 40.8]]},
       "distance_mi": 12.4,
       "duration_s": 1500,
@@ -102,41 +102,31 @@ levels were assessed and match the base, and `null` when no flip is known and a 
 (or the base) cannot be assessed because weather is missing or outside the forecast window. Summary
 counts include true flags in `unstable_checkpoints` and unknown flags in
 `unknown_stability_checkpoints`. Stability does not affect route ranking or recommendation.
-`source` is `"provider"` for a route the routing provider returned and `"generated"` for an extra
-route our fallback found (the UI labels generated routes as such). `origin_label` is one of `"provider alternative"`, `"avoiding motorways"`,
-`"forced detour, left of the main route"` or `"forced detour, right of the main route"`
-(left and right are relative to the direction of travel; no place names).
-When the provider returns fewer than three routes, the server makes up to 5 extra Mapbox
-requests to look for a third acceptable route (see ASSUMPTIONS.md, "Third-route fallback").
-Extra routes use the same weather, scoring and ranking as provider routes. If fewer than three
-routes remain, `notices` includes a plain sentence such as `"Only 2 routes available. The routing
-provider returned 2, and we could not find another route that was different enough."` (or `"... and
-we added 1 extra route by searching for a different way to drive it."`). No synthetic route is added, and a fallback failure,
-timeout or rate limit never fails the request. No extra requests are made when the provider
-returns three routes.
+`origin_label` is `"HERE route"`: every route comes from HERE Routing (truck mode, the best route
+plus up to 2 alternatives). No route is generated or invented by this server. When HERE returns
+fewer than three routes, `notices` includes `"Only N routes available from the routing provider"`.
+`eta_method` is `"annotations"` when HERE's per-span lengths and durations were used for checkpoint
+timing, and `"proportional"` when they were missing or unusable and the route duration was split
+by distance instead.
 `notices` also includes a plain-language warning if the recommended route contains any
 No Travel checkpoint or has missing weather data; the latter gives missing miles and
 checkpoint count. `recommendation_reason` names the criterion that decided the ranking
 and includes the rounded duration difference when it is nonzero.
 
-Validation errors return HTTP 400. A Mapbox Directions response indicating no driving route
-(`NoRoute` or `NoSegment`, including an HTTP 200 response with a no-route code or a successful
-response with no routes) returns HTTP 422 with code `no_route_found` and message
-`No driving route found between these places.` Other invalid, unavailable, or expired Mapbox
-route requests return HTTP 502, except Mapbox HTTP 422 responses with code `InvalidInput`.
-Those return HTTP 422 with code `route_too_far` and message
-`These places are too far apart for a driving route.` when the provider message mentions
-"maximum distance"; other `InvalidInput` responses return HTTP 422 with code
+Validation errors return HTTP 400. A HERE response with no routes (for example `noRouteFound` or
+`couldNotMatchOrigin`) returns HTTP 422 with code `no_route_found` and message
+`No driving route found between these places.` A HERE HTTP 400 or 422 returns HTTP 422 with code
 `route_not_supported` and message `A driving route could not be built between these places.`
-Provider message text is never returned to the client. Weather service failures return HTTP
+Other failures (such as an invalid key, server errors or timeouts) return HTTP 502 with code
+`routing_unavailable`; a HERE rate limit returns HTTP 429. Provider message text is never returned to the client. Weather service failures return HTTP
 502; rate limits return HTTP 429 and include a retry hint if one is supplied. Missing weather
 at individual checkpoints remains in the successful response as `weather_missing: true`. An
-unset `MAPBOX_TOKEN` returns HTTP 503 with a configuration error.
+unset `HERE_API_KEY` returns HTTP 503 with a configuration error.
 
 ## `GET /api/geocode?q=`
 
-Requires a non-empty `q` of at least 2 characters. Uses Mapbox Geocoding with the same
-server-side `MAPBOX_TOKEN`; returns up to 5 results.
+Requires a non-empty `q` of at least 2 characters. Uses HERE Autosuggest with the same
+server-side `HERE_API_KEY`; returns up to 5 places (cities, addresses, streets and named places).
 
 ```json
 {"results": [{"label": "Salt Lake City, Utah", "lat": 40.76, "lon": -111.89}]}
@@ -191,5 +181,5 @@ Liveness response:
 ## CORS and configuration
 
 `FRONTEND_ORIGIN` sets the one frontend origin allowed by CORS. It defaults to empty, which
-allows no cross-origin browser access. `MAPBOX_TOKEN` stays server-side. No endpoint uses a
+allows no cross-origin browser access. `HERE_API_KEY` stays server-side. No endpoint uses a
 database.

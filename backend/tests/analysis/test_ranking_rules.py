@@ -8,7 +8,7 @@ from pathlib import Path
 from analysis import RouteResult, RouteSummary, analyze_route, rank_routes
 from analysis.scoring import _risk_rank_key
 from risk import RiskLevel
-from routing.mapbox import parse_routes
+from routing.here import parse_routes
 from routing.models import Route
 from weather.models import WeatherSample
 
@@ -56,7 +56,7 @@ def constant_weather(route, interval, wind):
 
 
 def slc_provo():
-    payload = json.loads((FIXTURES / "mapbox_slc_provo.json").read_text(encoding="utf-8"))
+    payload = json.loads((FIXTURES / "here_slc_provo.json").read_text(encoding="utf-8"))
     return parse_routes(payload)[0]
 
 

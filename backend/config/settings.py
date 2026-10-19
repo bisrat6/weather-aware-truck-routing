@@ -60,8 +60,8 @@ WSGI_APPLICATION = "config.wsgi.application"
 DATABASES: dict[str, dict[str, str]] = {}
 
 # Multiplier applied to provider drive times to approximate a loaded truck.
-TRUCK_TIME_FACTOR = float(os.environ.get("TRUCK_TIME_FACTOR", "1.1"))
-MAPBOX_TOKEN = os.environ.get("MAPBOX_TOKEN", "")
+TRUCK_TIME_FACTOR = float(os.environ.get("TRUCK_TIME_FACTOR", "1.0"))
+HERE_API_KEY = os.environ.get("HERE_API_KEY", "")
 FRONTEND_ORIGIN = os.environ.get("FRONTEND_ORIGIN", "").strip().rstrip("/")
 OPEN_METEO_BASE_URL = (
     os.environ.get("OPEN_METEO_BASE_URL", "https://api.open-meteo.com").strip().rstrip("/")

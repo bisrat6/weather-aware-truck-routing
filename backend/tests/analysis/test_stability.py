@@ -7,7 +7,7 @@ import pytest
 from analysis import analyze_route
 from risk import RiskLevel
 from routing.checkpoints import sample_checkpoints
-from routing.mapbox import parse_routes
+from routing.here import parse_routes
 from weather.models import MissingWeather, WeatherSample
 from weather.service import WeatherService
 
@@ -16,7 +16,7 @@ NOW = datetime(2026, 10, 17, tzinfo=UTC)
 
 
 def recorded_route():
-    payload = json.loads((FIXTURES / "mapbox_slc_provo.json").read_text(encoding="utf-8"))
+    payload = json.loads((FIXTURES / "here_slc_provo.json").read_text(encoding="utf-8"))
     return parse_routes(payload)[0]
 
 

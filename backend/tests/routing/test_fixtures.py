@@ -1,4 +1,4 @@
-"""Runs every recorded/hand-built Mapbox fixture through parsing, checks and checkpoints.
+"""Runs every recorded HERE fixture through parsing, checks and checkpoints.
 
 Drop real responses into tests/fixtures/ with scripts/record_fixture.py and they are
 picked up here automatically.
@@ -13,9 +13,9 @@ import pytest
 
 from routing.checkpoints import METERS_PER_MILE, sample_checkpoints
 from routing.geodesy import check_route_distance
-from routing.mapbox import parse_routes
+from routing.here import parse_routes
 
-FIXTURES = sorted((Path(__file__).parent.parent / "fixtures").glob("mapbox_*.json"))
+FIXTURES = sorted((Path(__file__).parent.parent / "fixtures").glob("here_*.json"))
 
 
 def test_at_least_one_fixture_exists():
@@ -25,7 +25,7 @@ def test_at_least_one_fixture_exists():
 @pytest.fixture(params=FIXTURES, ids=lambda p: p.stem)
 def routes(request):
     payload = json.loads(request.param.read_text(encoding="utf-8"))
-    assert payload["code"] == "Ok"
+    assert payload["routes"]
     return parse_routes(payload)
 
 
@@ -35,12 +35,12 @@ def test_fixture_routes_are_well_formed(routes):
         assert len(r.coords) == len(r.cum_dist_m) == len(r.cum_dur_s)
         assert all(b >= a for a, b in pairwise(r.cum_dist_m))
         assert all(b >= a for a, b in pairwise(r.cum_dur_s))
-        assert r.origin_label == "provider alternative"
+        assert r.origin_label == "HERE route"
 
 
 def test_fixture_annotations_are_usable(routes):
-    # Real Mapbox responses should satisfy annotation count == coordinates - 1.
-    # If a recorded fixture fails this, the proportional fallback is firing in production.
+    # Real HERE responses should have usable spans.
+    # If a recorded fixture fails this, the proportional ETA fallback is firing in production.
     assert all(r.eta_method == "annotations" for r in routes)
 
 

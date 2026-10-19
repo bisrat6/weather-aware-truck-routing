@@ -103,7 +103,6 @@ button:focus-visible, input:focus-visible, summary:focus-visible, [role="radio"]
 .risk-badge__symbol { width: 16px; height: 16px; }
 .route-card__heading .risk-badge { margin-left: auto; }
 .route-card__provider { color: var(--link); font-size: var(--font-12); }
-.route-card__provider--generated { color: var(--warning-text); }
 .route-card__metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-2); color: var(--muted); }
 .route-card__metric { display: flex; align-items: center; gap: var(--space-2); min-width: 0; padding: var(--space-2); background: color-mix(in srgb, var(--surface) 72%, transparent); border: 1px solid var(--divider); border-radius: var(--radius-small); }
 .route-card__metric > span { display: grid; min-width: 0; gap: 2px; }

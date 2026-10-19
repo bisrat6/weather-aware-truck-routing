@@ -9,6 +9,7 @@ from rest_framework.test import APIClient
 
 from api.heatmap import MAX_HEATMAP_POINTS, sample_corridor
 from api.validation import HeatmapRequestSerializer
+from tests.here_helpers import load_fixture, route_geometry
 
 FIXTURES = Path(__file__).parents[1] / "fixtures"
 NOW = datetime(2026, 10, 17, 10, tzinfo=UTC)
@@ -124,8 +125,7 @@ def test_corridor_sampling_obeys_point_cap():
 
 
 def test_recorded_cross_country_geometry_fits_heatmap_input_limit():
-    fixture = json.loads((FIXTURES / "mapbox_la_nyc.json").read_text(encoding="utf-8"))
-    geometry = fixture["routes"][0]["geometry"]
+    geometry = route_geometry("la_nyc")
     serializer = HeatmapRequestSerializer(
         data={
             "geometry": geometry,
@@ -134,7 +134,7 @@ def test_recorded_cross_country_geometry_fits_heatmap_input_limit():
         },
         context={"now": NOW},
     )
-    assert len(geometry["coordinates"]) == 34_997
+    assert len(geometry["coordinates"]) == 30_238
     assert serializer.is_valid(), serializer.errors
 
 
@@ -195,19 +195,17 @@ def test_heatmap_rejects_swapped_latitude_longitude_geometry(client, monkeypatch
 def test_analyze_geometry_round_trips_unchanged_into_heatmap(client, monkeypatch):
     from django.test import override_settings
 
-    mapbox_payload = json.loads(
-        (FIXTURES / "mapbox_slc_provo.json").read_text(encoding="utf-8")
-    )
+    route_payload = load_fixture("slc_provo")
 
     def get(url, params=None, timeout=None):
-        if "directions/v5" in url:
-            return FakeResponse(body=mapbox_payload)
+        if "router.hereapi.com" in url:
+            return FakeResponse(body=route_payload)
         if "open-meteo.com" in url:
             return weather_response(params)
         raise AssertionError(f"unexpected upstream URL: {url}")
 
     monkeypatch.setattr("requests.get", get)
-    with override_settings(MAPBOX_TOKEN="round-trip-test-token"):
+    with override_settings(HERE_API_KEY="round-trip-test-key"):
         analyzed = client.post(
             "/api/analyze",
             {

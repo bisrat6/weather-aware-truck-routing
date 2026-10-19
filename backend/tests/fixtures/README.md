@@ -1,11 +1,9 @@
 # Fixtures
 
-`mapbox_handbuilt_*.json` are **hand-built**, not real Mapbox responses. They follow the real
-Directions response shape (`routes[].geometry.coordinates` as `[lon, lat]`,
-`routes[].legs[].annotation.{distance,duration}`, `code`, `uuid`) with synthetic numbers.
-
-Real responses are recorded with `scripts/record_fixture.py` into `mapbox_<name>.json`.
-`tests/routing/test_fixtures.py` runs every `mapbox_*.json` here through the parser.
+`here_*.json` are **real HERE Routing v8 responses** (truck mode, `alternatives=2`,
+`return=polyline,summary`, `spans=length,duration,speedLimit`) recorded with
+`scripts/record_fixture.py`: `routes[].sections[].{polyline,summary,spans}` with a flexible
+polyline. `tests/routing/test_fixtures.py` runs every `here_*.json` here through the parser.
 
 ## Weather fixtures
 

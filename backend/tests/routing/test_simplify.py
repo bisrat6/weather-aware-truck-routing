@@ -1,11 +1,8 @@
 """Tests for Douglas-Peucker polyline simplification."""
 
-import json
-from pathlib import Path
-
 from analysis import analyze_route
 from api.heatmap import sample_corridor
-from routing.mapbox import parse_routes
+from routing.here import parse_routes
 from routing.models import Coord
 from routing.simplify import (
     DEFAULT_SIMPLIFICATION_TOLERANCE_M,
@@ -13,8 +10,7 @@ from routing.simplify import (
     point_to_segment_distance_m,
     simplify_coords,
 )
-
-FIXTURES = Path(__file__).parents[1] / "fixtures"
+from tests.here_helpers import load_fixture, route_coords, route_geometry
 
 
 def test_simplify_preserves_short_sequences():
@@ -44,14 +40,12 @@ def test_point_to_segment_distance_zero_length_segment():
 
 
 def test_slc_provo_fixture_simplification_and_max_deviation():
-    fixture = json.loads((FIXTURES / "mapbox_slc_provo.json").read_text(encoding="utf-8"))
-    routes = fixture["routes"]
 
     # Route 0
-    c0: list[Coord] = [(c[1], c[0]) for c in routes[0]["geometry"]["coordinates"]]
-    assert len(c0) == 1013
+    c0: list[Coord] = route_coords("slc_provo", 0)
+    assert len(c0) == 917
     s0 = simplify_coords(c0, tolerance_m=DEFAULT_SIMPLIFICATION_TOLERANCE_M)
-    assert len(s0) == 63
+    assert len(s0) == 72
     dev0 = max_deviation_m(c0, s0)
     assert dev0 <= DEFAULT_SIMPLIFICATION_TOLERANCE_M
     assert dev0 < 34.0
@@ -59,10 +53,10 @@ def test_slc_provo_fixture_simplification_and_max_deviation():
     assert s0[-1] == c0[-1]
 
     # Route 1
-    c1: list[Coord] = [(c[1], c[0]) for c in routes[1]["geometry"]["coordinates"]]
-    assert len(c1) == 1279
+    c1: list[Coord] = route_coords("slc_provo", 1)
+    assert len(c1) == 923
     s1 = simplify_coords(c1, tolerance_m=DEFAULT_SIMPLIFICATION_TOLERANCE_M)
-    assert len(s1) == 74
+    assert len(s1) == 71
     dev1 = max_deviation_m(c1, s1)
     assert dev1 <= DEFAULT_SIMPLIFICATION_TOLERANCE_M
     assert dev1 < 34.0
@@ -71,14 +65,12 @@ def test_slc_provo_fixture_simplification_and_max_deviation():
 
 
 def test_la_nyc_fixture_simplification_and_max_deviation():
-    fixture = json.loads((FIXTURES / "mapbox_la_nyc.json").read_text(encoding="utf-8"))
-    routes = fixture["routes"]
 
     # Route 0
-    c0: list[Coord] = [(c[1], c[0]) for c in routes[0]["geometry"]["coordinates"]]
-    assert len(c0) == 34997
+    c0: list[Coord] = route_coords("la_nyc", 0)
+    assert len(c0) == 30238
     s0 = simplify_coords(c0, tolerance_m=DEFAULT_SIMPLIFICATION_TOLERANCE_M)
-    assert len(s0) == 2694
+    assert len(s0) == 3156
     dev0 = max_deviation_m(c0, s0)
     assert dev0 <= DEFAULT_SIMPLIFICATION_TOLERANCE_M
     assert dev0 < 35.0
@@ -86,10 +78,10 @@ def test_la_nyc_fixture_simplification_and_max_deviation():
     assert s0[-1] == c0[-1]
 
     # Route 1
-    c1: list[Coord] = [(c[1], c[0]) for c in routes[1]["geometry"]["coordinates"]]
-    assert len(c1) == 36916
+    c1: list[Coord] = route_coords("la_nyc", 1)
+    assert len(c1) == 26672
     s1 = simplify_coords(c1, tolerance_m=DEFAULT_SIMPLIFICATION_TOLERANCE_M)
-    assert len(s1) == 3175
+    assert len(s1) == 2666
     dev1 = max_deviation_m(c1, s1)
     assert dev1 <= DEFAULT_SIMPLIFICATION_TOLERANCE_M
     assert dev1 < 35.0
@@ -103,8 +95,7 @@ def test_distances_and_checkpoints_identical_before_and_after_simplification(mon
     from weather.models import WeatherSample
     from weather.service import WeatherService
 
-    fixture = json.loads((FIXTURES / "mapbox_slc_provo.json").read_text(encoding="utf-8"))
-    routes = parse_routes(fixture, truck_time_factor=1.1)
+    routes = parse_routes(load_fixture("slc_provo"), truck_time_factor=1.1)
     route = routes[0]
 
     departure = datetime(2026, 10, 17, 12, tzinfo=UTC)
@@ -123,15 +114,15 @@ def test_distances_and_checkpoints_identical_before_and_after_simplification(mon
     result_before = analyze_route(route, departure, 25.0, 34000.0, service)
 
     # Full route coords are intact
-    assert len(route.coords) == 1013
+    assert len(route.coords) == 917
     assert result_before.summary.duration_s == route.duration_s
     assert len(result_before.checkpoints) > 1
 
     # Now verify simplified display coords
     display_coords = simplify_coords(route.coords)
-    assert len(display_coords) == 63
+    assert len(display_coords) == 72
     # Original route coords are not mutated
-    assert len(route.coords) == 1013
+    assert len(route.coords) == 917
 
     # Re-running analysis gives identical distance, checkpoints, and risk
     result_after = analyze_route(route, departure, 25.0, 34000.0, service)
@@ -146,9 +137,8 @@ def test_distances_and_checkpoints_identical_before_and_after_simplification(mon
 
 
 def test_heatmap_accepts_simplified_geometry_and_produces_identical_corridor():
-    fixture = json.loads((FIXTURES / "mapbox_slc_provo.json").read_text(encoding="utf-8"))
-    orig_geom = fixture["routes"][0]["geometry"]
-    orig_coords: list[Coord] = [(c[1], c[0]) for c in orig_geom["coordinates"]]
+    orig_geom = route_geometry("slc_provo")
+    orig_coords: list[Coord] = route_coords("slc_provo")
 
     simp_coords = simplify_coords(orig_coords, tolerance_m=DEFAULT_SIMPLIFICATION_TOLERANCE_M)
     simp_geom = {"coordinates": [[lon, lat] for lat, lon in simp_coords]}

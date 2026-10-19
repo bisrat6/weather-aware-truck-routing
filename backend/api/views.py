@@ -1,4 +1,4 @@
-"""JSON API endpoints for route analysis and Mapbox geocoding."""
+"""JSON API endpoints for route analysis and HERE geocoding."""
 
 from __future__ import annotations
 
@@ -28,9 +28,8 @@ from api.validation import (
     HeatmapRequestSerializer,
     validate_geocode_query,
 )
-from routing.errors import MapboxError, MapboxNoRouteError, MapboxRateLimitError
-from routing.fallback import augment_routes
-from routing.mapbox import get_routes
+from routing.errors import ProviderError, ProviderNoRouteError, ProviderRateLimitError
+from routing.here import get_routes
 from weather.errors import WeatherError, WeatherRateLimitError
 from weather.service import WeatherService
 
@@ -40,24 +39,6 @@ _weather_service = WeatherService(
     base_url=settings.OPEN_METEO_BASE_URL,
     proxy_token=settings.OPEN_METEO_PROXY_TOKEN,
 )
-
-
-def _plural(count: int, word: str) -> str:
-    return f"{count} {word}" + ("" if count == 1 else "s")
-
-
-def _few_routes_notice(total: int, provider_count: int) -> str:
-    """Plain-language notice for fewer than 3 routes after the extra-route search."""
-    extra = total - provider_count
-    start = (
-        f"Only {_plural(total, 'route')} available. The routing provider returned {provider_count}"
-    )
-    if extra > 0:
-        return (
-            f"{start}, and we added {_plural(extra, 'extra route')} "
-            "by searching for a different way to drive it."
-        )
-    return f"{start}, and we could not find another route that was different enough."
 
 
 def _retry_hint(seconds: float | None) -> str:
@@ -74,7 +55,7 @@ def analyze(request: Request) -> Response:
     )
     serializer.is_valid(raise_exception=True)
     data = serializer.validated_data
-    if not settings.MAPBOX_TOKEN:
+    if not settings.HERE_API_KEY:
         raise APIError("routing_unavailable", "Route service is not configured.", 503)
     origin = (data["origin"]["lat"], data["origin"]["lon"])
     destination = (data["destination"]["lat"], data["destination"]["lon"])
@@ -82,42 +63,27 @@ def analyze(request: Request) -> Response:
         routes = get_routes(
             origin,
             destination,
-            settings.MAPBOX_TOKEN,
+            settings.HERE_API_KEY,
             truck_time_factor=settings.TRUCK_TIME_FACTOR,
         )
-    except MapboxRateLimitError as exc:
+    except ProviderRateLimitError as exc:
         raise APIError(
             "rate_limited", "Route service rate limit exceeded." + _retry_hint(exc.retry_after), 429
         ) from None
-    except MapboxNoRouteError:
+    except ProviderNoRouteError:
         raise APIError(
             "no_route_found",
             "No driving route found between these places.",
             422,
         ) from None
-    except MapboxError as exc:
-        if exc.status_code == 422 and exc.code == "InvalidInput":
-            if "maximum distance" in str(exc).casefold():
-                raise APIError(
-                    "route_too_far",
-                    "These places are too far apart for a driving route.",
-                    422,
-                ) from None
+    except ProviderError as exc:
+        if exc.status_code in (400, 422):
             raise APIError(
                 "route_not_supported",
                 "A driving route could not be built between these places.",
                 422,
             ) from None
         raise APIError("routing_unavailable", "Route service is unavailable.", 502) from None
-
-    # Best effort and never raises: returns the provider routes unchanged on any failure.
-    routes, fallback = augment_routes(
-        routes,
-        origin,
-        destination,
-        settings.MAPBOX_TOKEN,
-        truck_time_factor=settings.TRUCK_TIME_FACTOR,
-    )
 
     try:
         results = [
@@ -146,10 +112,7 @@ def analyze(request: Request) -> Response:
     route_indices = {id(result): index for index, result in enumerate(results)}
     notices = []
     if len(routes) < 3:
-        if fallback.attempted:
-            notices.append(_few_routes_notice(len(routes), fallback.provider_count))
-        else:
-            notices.append(f"Only {len(routes)} routes available from the provider")
+        notices.append(f"Only {len(routes)} routes available from the routing provider")
     recommended_summary = ranking.recommended.summary
     if recommended_summary.blocked:
         notices.append("Recommended route is blocked because it contains a No Travel checkpoint")
@@ -182,17 +145,17 @@ def geocode(request: Request) -> Response:
         query = validate_geocode_query(request.query_params.get("q"))
     except ValidationError as exc:
         raise APIError("invalid_request", "; ".join(map(str, exc.detail)), 400) from None
-    if not settings.MAPBOX_TOKEN:
+    if not settings.HERE_API_KEY:
         raise APIError("geocoding_unavailable", "Geocoding service is not configured.", 503)
     try:
-        results = fetch_geocodes(query, settings.MAPBOX_TOKEN)
-    except MapboxRateLimitError as exc:
+        results = fetch_geocodes(query, settings.HERE_API_KEY)
+    except ProviderRateLimitError as exc:
         raise APIError(
             "rate_limited",
             "Geocoding service rate limit exceeded." + _retry_hint(exc.retry_after),
             429,
         ) from None
-    except MapboxError:
+    except ProviderError:
         raise APIError("geocoding_unavailable", "Geocoding service is unavailable.", 502) from None
     return Response({"results": results})
 

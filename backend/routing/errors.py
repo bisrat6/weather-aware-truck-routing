@@ -7,8 +7,8 @@ class RoutingError(Exception):
     """Base class for every routing failure."""
 
 
-class MapboxError(RoutingError):
-    """Base class for Mapbox failures. Messages never contain the access token."""
+class ProviderError(RoutingError):
+    """Base class for routing and geocoding provider failures (never contains the API key)."""
 
     def __init__(
         self, message: str, *, status_code: int | None = None, code: str | None = None
@@ -18,37 +18,37 @@ class MapboxError(RoutingError):
         self.code = code
 
 
-class MapboxTimeoutError(MapboxError):
+class ProviderTimeoutError(ProviderError):
     """The request timed out."""
 
 
-class MapboxConnectionError(MapboxError):
-    """The request could not reach Mapbox (DNS, refused connection, TLS, ...)."""
+class ProviderConnectionError(ProviderError):
+    """The request could not reach the provider (DNS, refused connection, TLS, ...)."""
 
 
-class MapboxAuthError(MapboxError):
-    """Missing, invalid or unauthorised access token (HTTP 401/403)."""
+class ProviderAuthError(ProviderError):
+    """Missing, invalid or unauthorised API key (HTTP 401/403)."""
 
 
-class MapboxRateLimitError(MapboxError):
-    """Rate limit exceeded (HTTP 429). `retry_after` is seconds, if Mapbox said."""
+class ProviderRateLimitError(ProviderError):
+    """Rate limit exceeded (HTTP 429). `retry_after` is seconds, if the provider said."""
 
     def __init__(self, message: str, *, retry_after: float | None = None) -> None:
         super().__init__(message, status_code=429, code="RateLimited")
         self.retry_after = retry_after
 
 
-class MapboxServerError(MapboxError):
-    """Mapbox failed on its side (HTTP 5xx)."""
+class ProviderServerError(ProviderError):
+    """The provider failed on its side (HTTP 5xx)."""
 
 
-class MapboxNoRouteError(MapboxError):
-    """No drivable route between the points (code NoRoute / NoSegment)."""
+class ProviderNoRouteError(ProviderError):
+    """No drivable route between the points (no route found)."""
 
 
-class MapboxRequestError(MapboxError):
-    """Mapbox rejected the request (other 4xx, invalid input, unknown code)."""
+class ProviderRequestError(ProviderError):
+    """The provider rejected the request (other 4xx, invalid input, unknown code)."""
 
 
-class MapboxResponseError(MapboxError):
+class ProviderResponseError(ProviderError):
     """The response was not valid JSON or did not have the expected shape."""

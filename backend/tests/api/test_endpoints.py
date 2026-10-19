@@ -4,19 +4,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-import requests
 from django.test import override_settings
 from rest_framework.test import APIClient
 
-from tests.fallback_support import (
-    EXCLUDE,
-    MAIN,
-    Directions,
-    first_route_only,
-    load_payload,
-    scaled,
-    with_routes,
-)
+from tests.here_helpers import load_fixture
 
 FIXTURES = Path(__file__).parents[1] / "fixtures"
 TOKEN = "test-token-do-not-leak"
@@ -46,8 +37,8 @@ def body(**updates):
     return data
 
 
-def recorded_mapbox():
-    return json.loads((FIXTURES / "mapbox_slc_provo.json").read_text(encoding="utf-8"))
+def recorded_route():
+    return load_fixture("slc_provo")
 
 
 def recorded_weather():
@@ -55,7 +46,7 @@ def recorded_weather():
 
 
 def route_response(*, status=200, payload=None, headers=None):
-    return FakeResponse(status, recorded_mapbox() if payload is None else payload, headers)
+    return FakeResponse(status, recorded_route() if payload is None else payload, headers)
 
 
 def weather_response(params, *, status=200, missing_cell=False, headers=None):
@@ -80,21 +71,26 @@ def client(monkeypatch):
     from weather.service import WeatherService
 
     monkeypatch.setattr("api.views._weather_service", WeatherService(now=lambda: NOW))
-    with override_settings(MAPBOX_TOKEN=TOKEN):
+    with override_settings(HERE_API_KEY=TOKEN):
         yield APIClient()
 
 
 def mock_both_providers(monkeypatch, *, weather_status=200, missing_cell=False):
     def get(url, params=None, timeout=None):
-        if "directions/v5" in url:
+        if "router.hereapi.com" in url:
             return route_response()
         if "open-meteo.com" in url:
             return weather_response(params, status=weather_status, missing_cell=missing_cell)
-        if "geocoding/v5" in url:
+        if "autosuggest.search.hereapi.com" in url:
             return FakeResponse(
                 body={
-                    "features": [
-                        {"place_name": "Salt Lake City, Utah", "center": [-111.89, 40.76]}
+                    "items": [
+                        {
+                            "resultType": "locality",
+                            "title": "Salt Lake City, UT, United States",
+                            "position": {"lat": 40.76, "lng": -111.89},
+                        },
+                        {"resultType": "chainQuery", "title": "Salt Lake Coffee"},
                     ]
                 }
             )
@@ -105,7 +101,7 @@ def mock_both_providers(monkeypatch, *, weather_status=200, missing_cell=False):
 
 def mock_weather_for_all_route_cells(monkeypatch, *, wind_mph=None):
     def get(url, params=None, timeout=None):
-        if "directions/v5" in url:
+        if "router.hereapi.com" in url:
             return route_response()
         if "open-meteo.com" in url:
             template = recorded_weather()[0]
@@ -146,9 +142,9 @@ def test_analyze_happy_path_uses_recorded_fixtures_and_provider_notice(client, m
     assert "unstable_checkpoints" in data["routes"][0]["summary"]
     assert "unknown_stability_checkpoints" in data["routes"][0]["summary"]
     assert data["notices"] == [
-        "Only 2 routes available. The routing provider returned 2, "
-        "and we could not find another route that was different enough."
+        f"Only {len(data['routes'])} routes available from the routing provider"
     ]
+    assert {r["origin_label"] for r in data["routes"]} == {"HERE route"}
 
 
 def test_analyze_notice_discloses_recommended_blocked_route(client, monkeypatch):
@@ -219,26 +215,32 @@ def test_routing_down_returns_safe_502(client, monkeypatch):
     monkeypatch.setattr(
         "requests.get",
         lambda *args, **kwargs: FakeResponse(
-            503, {"message": f"bad {TOKEN} https://api.mapbox.com?access_token={TOKEN}"}
+            503, {"message": f"bad {TOKEN} https://router.hereapi.com/v8/routes?apiKey={TOKEN}"}
         ),
     )
     response = client.post("/api/analyze", body(), format="json")
     assert response.status_code == 502
     assert response.json()["error"]["code"] == "routing_unavailable"
     assert TOKEN not in response.content.decode()
-    assert "api.mapbox.com" not in response.content.decode()
+    assert "hereapi.com" not in response.content.decode()
 
 
 @pytest.mark.parametrize(
     "payload",
     [
         {
-            "code": "NoRoute",
-            "message": f"No route {TOKEN} https://api.mapbox.com/directions?access_token={TOKEN}",
+            "routes": [],
+            "notices": [
+                {
+                    "title": f"No route {TOKEN} https://router.hereapi.com/v8/routes?apiKey={TOKEN}",
+                    "code": "noRouteFound",
+                    "severity": "critical",
+                }
+            ],
         },
-        {"code": "Ok", "routes": []},
+        {"routes": []},
     ],
-    ids=["no-route-code", "empty-routes"],
+    ids=["no-route-notice", "empty-routes"],
 )
 def test_no_driving_route_returns_sanitized_422(client, monkeypatch, payload):
     monkeypatch.setattr("requests.get", lambda *args, **kwargs: FakeResponse(200, payload))
@@ -253,34 +255,18 @@ def test_no_driving_route_returns_sanitized_422(client, monkeypatch, payload):
         }
     }
     assert TOKEN not in response.content.decode()
-    assert "api.mapbox.com" not in response.content.decode()
+    assert "hereapi.com" not in response.content.decode()
 
 
-@pytest.mark.parametrize(
-    ("upstream_message", "expected_code", "expected_message"),
-    [
-        (
-            f"Route exceeds maximum distance limitation. {TOKEN} "
-            "https://api.mapbox.com/directions?access_token=private",
-            "route_too_far",
-            "These places are too far apart for a driving route.",
-        ),
-        (
-            f"Unsupported driving profile. provider-private-detail {TOKEN} "
-            "https://api.mapbox.com/directions?access_token=private",
-            "route_not_supported",
-            "A driving route could not be built between these places.",
-        ),
-    ],
-    ids=["maximum-distance", "other-invalid-input"],
-)
-def test_mapbox_invalid_input_422_is_mapped_and_sanitized(
-    client, monkeypatch, upstream_message, expected_code, expected_message
-):
+@pytest.mark.parametrize("status", [400, 422])
+def test_provider_rejecting_the_request_is_mapped_and_sanitized(client, monkeypatch, status):
+    upstream_cause = (
+        f"provider-private-detail {TOKEN} https://router.hereapi.com/v8/routes?apiKey={TOKEN}"
+    )
     monkeypatch.setattr(
         "requests.get",
         lambda *args, **kwargs: FakeResponse(
-            422, {"code": "InvalidInput", "message": upstream_message}
+            status, {"title": "Malformed request", "code": "E605001", "cause": upstream_cause}
         ),
     )
 
@@ -289,12 +275,27 @@ def test_mapbox_invalid_input_422_is_mapped_and_sanitized(
     response_body = response.content.decode()
     assert response.status_code == 422
     assert response.json() == {
-        "error": {"code": expected_code, "message": expected_message}
+        "error": {
+            "code": "route_not_supported",
+            "message": "A driving route could not be built between these places.",
+        }
     }
-    assert upstream_message not in response_body
     assert "provider-private-detail" not in response_body
     assert TOKEN not in response_body
-    assert "api.mapbox.com" not in response_body
+    assert "hereapi.com" not in response_body
+
+
+def test_provider_auth_failure_is_a_safe_502(client, monkeypatch):
+    monkeypatch.setattr(
+        "requests.get",
+        lambda *args, **kwargs: FakeResponse(
+            401, {"error": "Unauthorized", "error_description": f"apiKey invalid {TOKEN}"}
+        ),
+    )
+    response = client.post("/api/analyze", body(), format="json")
+    assert response.status_code == 502
+    assert response.json()["error"]["code"] == "routing_unavailable"
+    assert TOKEN not in response.content.decode()
 
 
 def test_routing_rate_limit_has_retry_hint_and_no_credentials(client, monkeypatch):
@@ -302,7 +303,7 @@ def test_routing_rate_limit_has_retry_hint_and_no_credentials(client, monkeypatc
         "requests.get",
         lambda *args, **kwargs: FakeResponse(
             429,
-            {"message": f"{TOKEN} https://api.mapbox.com"},
+            {"message": f"{TOKEN} https://router.hereapi.com"},
             {"Retry-After": "17"},
         ),
     )
@@ -310,12 +311,12 @@ def test_routing_rate_limit_has_retry_hint_and_no_credentials(client, monkeypatc
     assert response.status_code == 429
     assert "17 seconds" in response.json()["error"]["message"]
     assert TOKEN not in response.content.decode()
-    assert "api.mapbox.com" not in response.content.decode()
+    assert "hereapi.com" not in response.content.decode()
 
 
 def test_weather_down_returns_safe_502(client, monkeypatch):
     def get(url, params=None, timeout=None):
-        if "directions/v5" in url:
+        if "router.hereapi.com" in url:
             return route_response()
         return FakeResponse(
             503,
@@ -333,7 +334,7 @@ def test_weather_down_returns_safe_502(client, monkeypatch):
 
 def test_weather_rate_limit_has_retry_hint_and_no_credentials(client, monkeypatch):
     def get(url, params=None, timeout=None):
-        if "directions/v5" in url:
+        if "router.hereapi.com" in url:
             return route_response()
         return weather_response(params, status=429, headers={"Retry-After": "23"})
 
@@ -347,7 +348,7 @@ def test_weather_rate_limit_has_retry_hint_and_no_credentials(client, monkeypatc
 
 def test_weather_daily_rate_limit_fails_fast_with_429_json(client, monkeypatch):
     def get(url, params=None, timeout=None):
-        if "directions/v5" in url:
+        if "router.hereapi.com" in url:
             return route_response()
         return FakeResponse(
             429,
@@ -379,7 +380,9 @@ def test_geocode_proxy_returns_limited_shape(client, monkeypatch):
     response = client.get("/api/geocode", {"q": "Salt Lake City"})
     assert response.status_code == 200
     assert response.json() == {
-        "results": [{"label": "Salt Lake City, Utah", "lat": 40.76, "lon": -111.89}]
+        "results": [
+            {"label": "Salt Lake City, UT, United States", "lat": 40.76, "lon": -111.89}
+        ]
     }
 
 
@@ -387,14 +390,14 @@ def test_geocode_upstream_error_is_safe(client, monkeypatch):
     monkeypatch.setattr(
         "requests.get",
         lambda *args, **kwargs: FakeResponse(
-            503, {"message": f"{TOKEN} https://api.mapbox.com/geocoding"}
+            503, {"message": f"{TOKEN} https://autosuggest.search.hereapi.com/v1/autosuggest?apiKey={TOKEN}"}
         ),
     )
     response = client.get("/api/geocode", {"q": "Salt Lake"})
     assert response.status_code == 502
     assert response.json()["error"]["code"] == "geocoding_unavailable"
     assert TOKEN not in response.content.decode()
-    assert "api.mapbox.com" not in response.content.decode()
+    assert "hereapi.com" not in response.content.decode()
 
 
 @pytest.mark.parametrize("query", [None, "", "x", "  "])
@@ -430,109 +433,36 @@ def test_gzip_compression_returns_identical_json_payload(client, monkeypatch):
     assert json.loads(decompressed_bytes.decode("utf-8")) == uncompressed.json()
 
 
+def three_route_payload():
+    payload = recorded_route()
+    while len(payload["routes"]) < 3:
+        payload["routes"].append(copy.deepcopy(payload["routes"][0]))
+    return payload
 
-# ------------------------------------------------------------------ third-route fallback
 
-
-def mock_directions_and_weather(monkeypatch, directions):
+def test_analyze_returns_three_routes_when_provider_returns_three(client, monkeypatch):
     def get(url, params=None, timeout=None):
-        if "directions/v5" in url:
-            return directions(url, params, timeout)
-        if "open-meteo.com" in url:
-            return weather_response(params)
-        raise AssertionError(f"unexpected upstream {url}")
+        if "router.hereapi.com" in url:
+            return route_response(payload=three_route_payload())
+        return weather_response(params)
 
     monkeypatch.setattr("requests.get", get)
-
-
-def test_analyze_returns_fallback_route_with_its_origin_label(client, monkeypatch):
-    directions = Directions(
-        {"main": load_payload(MAIN), "exclude": scaled(load_payload(EXCLUDE), duration=0.5)},
-        default=(500, {}),
-    )
-    mock_directions_and_weather(monkeypatch, directions)
     data = client.post("/api/analyze", body(), format="json").json()
-    assert [r["origin_label"] for r in data["routes"]] == [
-        "provider alternative",
-        "provider alternative",
-        "avoiding motorways",
-    ]
-    assert [r["source"] for r in data["routes"]] == ["provider", "provider", "generated"]
+    assert len(data["routes"]) == 3
     assert sorted(data["ranking"]) == [0, 1, 2]
     assert data["notices"] == []
 
 
-@pytest.mark.parametrize(
-    "failure", [requests.Timeout("slow"), (429, {"message": "limit"}), (500, {})]
-)
-def test_analyze_still_returns_main_result_when_every_fallback_request_fails(
-    client, monkeypatch, failure
-):
-    directions = Directions({"main": load_payload(MAIN)}, default=failure)
-    mock_directions_and_weather(monkeypatch, directions)
-    response = client.post("/api/analyze", body(), format="json")
-    assert response.status_code == 200
-    data = response.json()
-    assert len(data["routes"]) == 2
-    assert data["notices"] == [
-        "Only 2 routes available. The routing provider returned 2, "
-        "and we could not find another route that was different enough."
-    ]
-    assert len(directions.extra_calls) <= 5
+def test_analyze_asks_here_for_truck_routes_with_two_alternatives(client, monkeypatch):
+    seen = {}
 
+    def get(url, params=None, timeout=None):
+        if "router.hereapi.com" in url:
+            seen.update(params)
+            return route_response()
+        return weather_response(params)
 
-def test_analyze_notice_counts_provider_and_accepted_routes(client, monkeypatch):
-    directions = Directions(
-        {
-            "main": first_route_only(load_payload(MAIN)),
-            "exclude": first_route_only(scaled(load_payload(EXCLUDE), duration=0.5)),
-        },
-        default=(500, {}),
-    )
-    mock_directions_and_weather(monkeypatch, directions)
-    data = client.post("/api/analyze", body(), format="json").json()
-    assert [r["origin_label"] for r in data["routes"]] == [
-        "provider alternative",
-        "avoiding motorways",
-    ]
-    assert data["notices"] == [
-        "Only 2 routes available. The routing provider returned 1, "
-        "and we added 1 extra route by searching for a different way to drive it."
-    ]
-
-
-def test_analyze_makes_no_fallback_requests_when_provider_returns_three(client, monkeypatch):
-    directions = Directions({"main": with_routes(load_payload(MAIN), 3)})
-    mock_directions_and_weather(monkeypatch, directions)
-    data = client.post("/api/analyze", body(), format="json").json()
-    assert len(data["routes"]) == 3
-    assert directions.calls == ["main"]
-    assert data["notices"] == []
-
-
-def test_failed_fallback_does_not_change_ranking(client, monkeypatch):
-    def analyze(directions, patch_identity=False):
-        mock_directions_and_weather(monkeypatch, directions)
-        if patch_identity:
-            from routing.fallback import FallbackReport
-
-            monkeypatch.setattr(
-                "api.views.augment_routes",
-                lambda routes, *a, **k: (list(routes), FallbackReport(len(routes))),
-            )
-        data = client.post("/api/analyze", body(), format="json").json()
-        return {k: data[k] for k in ("routes", "ranking", "recommended", "recommendation_reason")}
-
-    with_failed_fallback = analyze(Directions({"main": load_payload(MAIN)}, default=(500, {})))
-    without_fallback = analyze(Directions({"main": load_payload(MAIN)}), patch_identity=True)
-    assert with_failed_fallback == without_fallback
-
-
-def test_notice_has_no_semicolons_or_parentheses_and_pluralizes():
-    from api.views import _few_routes_notice
-
-    for total, provider in ((1, 1), (2, 2), (2, 1), (3, 1)):
-        text = _few_routes_notice(total, provider)
-        assert ";" not in text and "(" not in text
-    assert _few_routes_notice(1, 1).startswith("Only 1 route available.")
-    assert "2 extra routes" in _few_routes_notice(3, 1)
+    monkeypatch.setattr("requests.get", get)
+    client.post("/api/analyze", body(), format="json")
+    assert seen["transportMode"] == "truck" and seen["alternatives"] == "2"
+    assert seen["apiKey"] == TOKEN

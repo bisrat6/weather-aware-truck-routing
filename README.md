@@ -3,7 +3,7 @@
 React + Django app that recommends the safest truck route based on weather,
 load weight and travel time.The assessment brief is not included in this repository.
 
-**Status:** the pure-Python risk engine (`backend/risk/`) and routing helpers (`backend/routing/`: Mapbox client, checkpoint sampling, distance check) are implemented.
+**Status:** the pure-Python risk engine (`backend/risk/`) and routing helpers (`backend/routing/`: HERE client, checkpoint sampling, distance check) are implemented.
 The Open-Meteo weather client (`backend/weather/`) is implemented too. Ranking, the API endpoints and the frontend are not built yet.
 
 ## Development
@@ -21,14 +21,14 @@ pytest
 
 Assumptions made where the brief is ambiguous: `docs/ASSUMPTIONS.md`.
 
-## Recording real Mapbox fixtures
+## Recording real HERE fixtures
 
 ```
 cd backend
-MAPBOX_TOKEN=pk.... python scripts/record_fixture.py
+HERE_API_KEY=... python scripts/record_fixture.py --standard
 ```
 
-Responses are saved to `backend/tests/fixtures/mapbox_<name>.json` and are picked up by
+Responses are saved to `backend/tests/fixtures/here_<name>.json` and are picked up by
 `tests/routing/test_fixtures.py` automatically.
 
 ## Recording a real Open-Meteo fixture

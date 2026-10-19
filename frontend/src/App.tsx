@@ -217,13 +217,6 @@ function routeTitle(route: AnalyzedRoute): string {
   return `Route ${route.route_index + 1}`;
 }
 
-function routeSourceText(route: AnalyzedRoute): string {
-  if (route.source === "provider") return "Route from the routing provider";
-  if (route.origin_label === "avoiding motorways") return "Extra route we generated: avoids motorways";
-  const side = route.origin_label.includes("left") ? "left" : "right";
-  return `Extra route we generated: detour to the ${side} of the main route`;
-}
-
 function rankedRoutes(data: AnalyzeResponse): AnalyzedRoute[] {
   return data.ranking.flatMap((index) => {
     const route = data.routes.find((candidate) => candidate.route_index === index);
@@ -372,14 +365,7 @@ function RouteCard({
           {recommended && <span className="recommended-pill">Recommended</span>}
           <RiskBadge level={level} />
         </span>
-        <span
-          className={`route-card__provider${route.source === "generated" ? " route-card__provider--generated" : ""}`}
-          title={route.source === "generated"
-            ? "The routing provider did not suggest this route. We asked it to route a different way, then checked the result."
-            : undefined}
-        >
-          {routeSourceText(route)}
-        </span>
+        <span className="route-card__provider">Truck route from HERE</span>
         <span className="route-card__metrics">
           <span className="route-card__metric">
             <RouteIcon size={15} aria-hidden="true" />
