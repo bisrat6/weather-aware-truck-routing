@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent } from "react";
 import {
   CalendarClock,
   ChevronDown,
@@ -24,33 +24,6 @@ type CachedHeatmap = { response: HeatmapResponse; requestBytes: number; response
 
 const OPEN_METEO_URL = "https://open-meteo.com/";
 const HEATMAP_RISK_LEVELS: RiskLevel[] = ["Low", "Moderate", "High", "Severe", "No Travel"];
-
-function stormDemoEnabled(): boolean {
-  return import.meta.env.DEV && new URLSearchParams(window.location.search).get("demo") === "storm";
-}
-
-function makeStormDemo(response: HeatmapResponse): HeatmapResponse {
-  const missingIndexes = new Set([0.11, 0.52, 0.88].map((part) => Math.round((response.points.length - 1) * part)));
-  return {
-    ...response,
-    points: response.points.map((point, pointIndex) => ({
-      ...point,
-      risk: response.hours.map((_, hour) => {
-        if (missingIndexes.has(pointIndex)) return null;
-        const progress = hour / Math.max(1, response.hours.length - 1);
-        const stormStrength = Math.sin(progress * Math.PI);
-        const routePosition = response.points.length < 2 ? 0.5 : pointIndex / (response.points.length - 1);
-        const distanceFromCenter = Math.abs(routePosition - 0.5);
-        const stormWidth = 0.02 + stormStrength * 0.18;
-        if (stormStrength > 0.45 && distanceFromCenter <= stormWidth * 0.18) return 4; // No Travel
-        if (stormStrength > 0.18 && distanceFromCenter <= stormWidth * 0.4) return 3;  // Severe
-        if (stormStrength > 0.1 && distanceFromCenter <= stormWidth * 0.7) return 2;   // High
-        if (stormStrength > 0.04 && distanceFromCenter <= stormWidth) return 1;        // Moderate
-        return 0; // Low
-      }),
-    })),
-  };
-}
 
 function localTimezoneLabel(value: string): string {
   const date = new Date(value);
@@ -82,8 +55,6 @@ function HeatmapPanel({
   onRetry,
   enabled,
   onEnabledChange,
-  demo,
-  onToggleDemo,
 }: {
   response: HeatmapResponse | null;
   routeIndex: number | null;
@@ -93,8 +64,6 @@ function HeatmapPanel({
   onRetry: () => void;
   enabled: boolean;
   onEnabledChange: (enabled: boolean) => void;
-  demo: boolean;
-  onToggleDemo?: () => void;
 }) {
   const [hour, setHour] = useState(0);
 
@@ -129,17 +98,6 @@ function HeatmapPanel({
         <h2 id="heatmap-title" className="section-title">
           {routeIndex === null ? "Weather forecast" : `Forecast along Route ${routeIndex + 1}`}
         </h2>
-        {demo && <span className="heatmap-demo-badge">DEMO STORM</span>}
-        {response && onToggleDemo && (
-          <button
-            type="button"
-            className="demo-storm-button"
-            onClick={onToggleDemo}
-            title={demo ? "Clear simulated storm" : "Simulate moving storm across route"}
-          >
-            {demo ? "Exit demo storm" : "Simulate storm"}
-          </button>
-        )}
         <label className="heatmap-toggle">
           <input type="checkbox" checked={enabled} onChange={(event) => onEnabledChange(event.target.checked)} />
           <span>Show</span>
@@ -605,12 +563,7 @@ export default function App() {
   const [heatmapRequestedAt, setHeatmapRequestedAt] = useState<number | null>(null);
   const [heatmapRequestBytes, setHeatmapRequestBytes] = useState<number | null>(null);
   const [heatmapResponseBytes, setHeatmapResponseBytes] = useState<number | null>(null);
-  const [userDemoStorm, setUserDemoStorm] = useState(false);
-  const demoHeatmap = stormDemoEnabled() || userDemoStorm;
-  const displayedHeatmapResponse = useMemo(
-    () => heatmapResponse && demoHeatmap ? makeStormDemo(heatmapResponse) : heatmapResponse,
-    [heatmapResponse, demoHeatmap],
-  );
+  const displayedHeatmapResponse = heatmapResponse;
 
   const handleHeatmapHourChange = useCallback((hour: number) => {
     routeMapRef.current?.setHeatmapHour(hour);
@@ -932,8 +885,6 @@ export default function App() {
             onRetry={() => setHeatmapRetry((count) => count + 1)}
             enabled={heatmapEnabled}
             onEnabledChange={setHeatmapEnabled}
-            demo={demoHeatmap}
-            onToggleDemo={() => setUserDemoStorm((prev) => !prev)}
           />
         </div>
       </aside>

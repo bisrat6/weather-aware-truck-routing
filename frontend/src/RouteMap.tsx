@@ -1,5 +1,6 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type CSSProperties } from "react";
 import Map, {
+  AttributionControl,
   NavigationControl,
   Popup,
   type MapLayerMouseEvent,
@@ -748,13 +749,14 @@ export const RouteMap = forwardRef<RouteMapHandle, RouteMapProps>(function Route
         ref={mapRef}
         initialViewState={MAP_INITIAL_VIEW}
         mapStyle={BASEMAP_STYLE}
-        attributionControl={{ compact: false, customAttribution: "Weather data: Open-Meteo" }}
+        attributionControl={false}
         interactiveLayerIds={[CHECKPOINT_LAYER, CHECKPOINT_LOW_LAYER]}
         onClick={handleMapClick}
         onLoad={() => setLoaded(true)}
         style={{ width: "100%", height: "100%" }}
       >
-        <NavigationControl position="bottom-right" showCompass={false} />
+        <NavigationControl position="top-right" showCompass={false} />
+        <AttributionControl compact={true} position="bottom-right" customAttribution="Weather data: Open-Meteo" />
         {popupCheckpoint && (
           <CheckpointPopup checkpoint={popupCheckpoint} onClose={() => setPopupCheckpoint(null)} />
         )}
