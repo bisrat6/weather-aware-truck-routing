@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent } from "react";
 import {
   CalendarClock,
   ChevronDown,
@@ -11,7 +11,7 @@ import {
 } from "lucide-react";
 import { analyze, health, heatmap } from "./api";
 import { PlacePicker, type Place } from "./PlacePicker";
-import { RouteMap } from "./RouteMap";
+import { RouteMap, type RouteMapHandle } from "./RouteMap";
 import { RISK_LEVELS, riskColorToken, type RiskLabel } from "./constants";
 import { RiskIcon } from "./RiskIcon";
 import type { AnalyzeResponse, AnalyzedRoute, Checkpoint, HeatmapResponse, RiskLevel } from "./types";
@@ -77,7 +77,6 @@ function HeatmapPanel({
   routeIndex,
   loading,
   unavailable,
-  hour,
   onHourChange,
   enabled,
   onEnabledChange,
@@ -87,12 +86,18 @@ function HeatmapPanel({
   routeIndex: number | null;
   loading: boolean;
   unavailable: boolean;
-  hour: number;
   onHourChange: (hour: number) => void;
   enabled: boolean;
   onEnabledChange: (enabled: boolean) => void;
   demo: boolean;
 }) {
+  const [hour, setHour] = useState(0);
+
+  useEffect(() => {
+    setHour(0);
+    onHourChange(0);
+  }, [response, onHourChange]);
+
   const hourValue = response?.hours[hour] ?? response?.hours[0] ?? "";
   const timeLabel = hourValue
     ? localHeatmapTime(hourValue, response?.hours[0] ?? hourValue)
@@ -137,7 +142,11 @@ function HeatmapPanel({
         value={hour}
         disabled={!response}
         aria-valuetext={hourValue ? `${timeLabel}, ${timezone}` : timeLabel}
-        onChange={(event) => onHourChange(Number(event.target.value))}
+        onChange={(event) => {
+          const nextHour = Number(event.target.value);
+          setHour(nextHour);
+          onHourChange(nextHour);
+        }}
       />
       <div className="heatmap-range-ticks" aria-hidden="true">
         {[12, 24, 36].map((tickHour) => (
@@ -430,11 +439,11 @@ export default function App() {
   const [waking, setWaking] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState(false);
+  const routeMapRef = useRef<RouteMapHandle | null>(null);
   const [heatmapContext, setHeatmapContext] = useState<HeatmapContext | null>(null);
   const [heatmapResponse, setHeatmapResponse] = useState<HeatmapResponse | null>(null);
   const [heatmapLoading, setHeatmapLoading] = useState(false);
   const [heatmapUnavailable, setHeatmapUnavailable] = useState(false);
-  const [heatmapHour, setHeatmapHour] = useState(0);
   const [heatmapEnabled, setHeatmapEnabled] = useState(true);
   const [heatmapRequestedAt, setHeatmapRequestedAt] = useState<number | null>(null);
   const [heatmapRequestBytes, setHeatmapRequestBytes] = useState<number | null>(null);
@@ -444,6 +453,20 @@ export default function App() {
     () => heatmapResponse && demoHeatmap ? makeStormDemo(heatmapResponse) : heatmapResponse,
     [heatmapResponse, demoHeatmap],
   );
+
+  const handleHeatmapHourChange = useCallback((hour: number) => {
+    routeMapRef.current?.setHeatmapHour(hour);
+  }, []);
+
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    (window as unknown as Record<string, unknown>).__runSliderBenchmark = (moves = 100) => {
+      routeMapRef.current?.runBenchmark(moves);
+    };
+    return () => {
+      delete (window as unknown as Record<string, unknown>).__runSliderBenchmark;
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -493,7 +516,6 @@ export default function App() {
       setHeatmapRequestedAt(null);
       setHeatmapLoading(false);
       setHeatmapUnavailable(false);
-      setHeatmapHour(0);
       return;
     }
 
@@ -512,7 +534,6 @@ export default function App() {
     setHeatmapResponse(null);
     setHeatmapLoading(true);
     setHeatmapUnavailable(false);
-    setHeatmapHour(0);
 
     let responseBytes = 0;
     void heatmap(requestBody, controller.signal, (bodyText) => {
@@ -548,7 +569,6 @@ export default function App() {
     setHeatmapRequestBytes(null);
     setHeatmapResponseBytes(null);
     heatmapCache.current.clear();
-    setHeatmapHour(0);
     setLoading(true);
     setWaking(false);
     setError(null);
@@ -596,11 +616,11 @@ export default function App() {
     <main className="workspace">
       <section className="map-stage" aria-label="Route map">
         <RouteMap
+          ref={routeMapRef}
           routes={data?.routes ?? []}
           recommended={data?.recommended ?? null}
           selectedRoute={activeRoute}
           heatmapResponse={displayedHeatmapResponse}
-          heatmapHour={heatmapHour}
           heatmapEnabled={heatmapEnabled}
           heatmapRequestedAt={heatmapRequestedAt}
           heatmapRequestBytes={heatmapRequestBytes}
@@ -608,7 +628,14 @@ export default function App() {
         />
         <div className="risk-legend" aria-label="Risk level legend">
           <span className="risk-legend__title">Checkpoint risk at arrival</span>
-          <span className="risk-legend__description">Weather and load when the truck reaches each point</span>
+          {heatmapEnabled && (
+            <span className="risk-legend__layer-title">Weather risk by hour</span>
+          )}
+          <span className="risk-legend__description">
+            {heatmapEnabled
+              ? "Weather risk by hour along route · Checkpoint conditions at ETA"
+              : "Weather and load when the truck reaches each point"}
+          </span>
           {levelsDemoEnabled && (
             <span className="heatmap-demo-badge">DEMO DATA</span>
           )}
@@ -722,8 +749,7 @@ export default function App() {
             routeIndex={activeRoute?.route_index ?? null}
             loading={heatmapLoading}
             unavailable={heatmapUnavailable}
-            hour={heatmapHour}
-            onHourChange={setHeatmapHour}
+            onHourChange={handleHeatmapHourChange}
             enabled={heatmapEnabled}
             onEnabledChange={setHeatmapEnabled}
             demo={demoHeatmap}

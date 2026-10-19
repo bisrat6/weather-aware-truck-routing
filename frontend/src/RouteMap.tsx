@@ -1,11 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type CSSProperties } from "react";
 import Map, {
   NavigationControl,
   Popup,
   type MapLayerMouseEvent,
   type MapRef,
 } from "react-map-gl/maplibre";
-import { GeoJSONSource, type Map as MapLibreMap } from "maplibre-gl";
+import { GeoJSONSource } from "maplibre-gl";
 import { Compass } from "lucide-react";
 import type { ExpressionSpecification } from "@maplibre/maplibre-gl-style-spec";
 import type { Feature, FeatureCollection, LineString, Point } from "geojson";
@@ -30,17 +30,9 @@ const DESTINATION_LAYER = "active-route-destination";
 const HEATMAP_SOURCE = "forecast-risk-points";
 const HEATMAP_LAYER = "forecast-risk-density";
 const HEATMAP_CIRCLE_LAYER = "forecast-risk-circles";
-const HEATMAP_LOW_CIRCLE_LAYER = "forecast-risk-low-circles";
-const HEATMAP_MISSING_LAYER = "forecast-risk-missing";
-const HEATMAP_LABELS: RiskLabel[] = ["Low", "Moderate", "High", "Severe", "No Travel"];
 
 interface HeatmapProperties {
   risk_values: (number | null)[];
-  risk_level: number | null;
-  heat_weight: number;
-  weather_missing: boolean;
-  marker_image: string;
-  near_checkpoint: boolean;
 }
 
 type HeatmapFeature = Feature<Point, HeatmapProperties>;
@@ -51,35 +43,57 @@ const EMPTY_HEATMAP: HeatmapCollection = { type: "FeatureCollection", features: 
 function heatmapCollection(response: HeatmapResponse): HeatmapCollection {
   return {
     type: "FeatureCollection",
-    features: response.points.map((point, index): HeatmapFeature => {
-      const risk = point.risk[0] ?? null;
-      return {
-        type: "Feature",
-        id: index,
-        properties: {
-          risk_values: point.risk,
-          risk_level: risk,
-          heat_weight: risk ?? 0,
-          weather_missing: risk === null,
-          marker_image: riskIconName(risk === null ? "No data" : HEATMAP_LABELS[risk]),
-          near_checkpoint: false,
-        },
-        geometry: { type: "Point", coordinates: [point.lon, point.lat] },
-      };
-    }),
+    features: response.points.map((point, index): HeatmapFeature => ({
+      type: "Feature",
+      id: index,
+      properties: {
+        risk_values: point.risk,
+      },
+      geometry: { type: "Point", coordinates: [point.lon, point.lat] },
+    })),
   };
+}
+
+function heatmapWeightExpression(hour: number): ExpressionSpecification {
+  return [
+    "case",
+    ["==", ["at", hour, ["get", "risk_values"]], null], 0,
+    ["==", ["at", hour, ["get", "risk_values"]], 0], 0.05,
+    ["==", ["at", hour, ["get", "risk_values"]], 1], 0.3,
+    ["==", ["at", hour, ["get", "risk_values"]], 2], 0.6,
+    ["==", ["at", hour, ["get", "risk_values"]], 3], 0.85,
+    ["==", ["at", hour, ["get", "risk_values"]], 4], 1.0,
+    0,
+  ] as unknown as ExpressionSpecification;
+}
+
+function heatmapColorExpression(hour: number): ExpressionSpecification {
+  return [
+    "case",
+    ["==", ["at", hour, ["get", "risk_values"]], null], getRiskColor("No data"),
+    ["==", ["at", hour, ["get", "risk_values"]], 0], getRiskColor("Low"),
+    ["==", ["at", hour, ["get", "risk_values"]], 1], getRiskColor("Moderate"),
+    ["==", ["at", hour, ["get", "risk_values"]], 2], getRiskColor("High"),
+    ["==", ["at", hour, ["get", "risk_values"]], 3], getRiskColor("Severe"),
+    ["==", ["at", hour, ["get", "risk_values"]], 4], getRiskColor("No Travel"),
+    getRiskColor("No data"),
+  ] as unknown as ExpressionSpecification;
 }
 
 function performanceEnabled(): boolean {
   return import.meta.env.DEV && new URLSearchParams(window.location.search).get("perf") === "1";
 }
 
-interface RouteMapProps {
+export interface RouteMapHandle {
+  setHeatmapHour: (hour: number) => void;
+  runBenchmark: (moves?: number) => void;
+}
+
+export interface RouteMapProps {
   routes: AnalyzedRoute[];
   recommended: number | null;
   selectedRoute: AnalyzedRoute | null;
   heatmapResponse: HeatmapResponse | null;
-  heatmapHour: number;
   heatmapEnabled: boolean;
   heatmapRequestedAt: number | null;
   heatmapRequestBytes: number | null;
@@ -173,25 +187,6 @@ function endpointCollection(route: AnalyzedRoute | null): FeatureCollection<Poin
   };
 }
 
-function updateHeatmapFeatureState(
-  map: MapLibreMap,
-  data: HeatmapCollection,
-  hour: number,
-  route: AnalyzedRoute | null,
-): void {
-  const checkpointPixels = (route?.checkpoints ?? []).map((checkpoint) => map.project([checkpoint.lon, checkpoint.lat]));
-  for (const feature of data.features) {
-    const level = feature.properties.risk_values[hour] ?? null;
-    const pixel = map.project(feature.geometry.coordinates as [number, number]);
-    feature.properties.risk_level = level;
-    feature.properties.heat_weight = level ?? 0;
-    feature.properties.weather_missing = level === null;
-    feature.properties.marker_image = riskIconName(level === null ? "No data" : HEATMAP_LABELS[level]);
-    feature.properties.near_checkpoint = checkpointPixels.some(
-      (checkpointPixel) => Math.hypot(pixel.x - checkpointPixel.x, pixel.y - checkpointPixel.y) <= 1.5,
-    );
-  }
-}
 
 function localEta(value: string): string {
   return new Date(value).toLocaleString(undefined, {
@@ -263,20 +258,22 @@ function CheckpointPopup({
   );
 }
 
-export function RouteMap({
-  routes,
-  recommended,
-  selectedRoute,
-  heatmapResponse,
-  heatmapHour,
-  heatmapEnabled,
-  heatmapRequestedAt,
-  heatmapRequestBytes,
-  heatmapResponseBytes,
-}: RouteMapProps) {
+export const RouteMap = forwardRef<RouteMapHandle, RouteMapProps>(function RouteMap(
+  {
+    routes,
+    recommended,
+    selectedRoute,
+    heatmapResponse,
+    heatmapEnabled,
+    heatmapRequestedAt,
+    heatmapRequestBytes,
+    heatmapResponseBytes,
+  },
+  ref,
+) {
   const mapRef = useRef<MapRef>(null);
-  const heatmapMeasureId = useRef(0);
   const perfLoggedResponses = useRef(new WeakSet<HeatmapResponse>());
+  const sliderSamples = useRef<number[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [styleRevision, setStyleRevision] = useState(0);
   const [popupCheckpoint, setPopupCheckpoint] = useState<Checkpoint | null>(null);
@@ -284,8 +281,58 @@ export function RouteMap({
   const [perfFirstRenderMs, setPerfFirstRenderMs] = useState<number | null>(null);
   const perfEnabled = performanceEnabled();
   const heatmapData = useMemo(
-    () => heatmapResponse ? heatmapCollection(heatmapResponse) : null,
+    () => (heatmapResponse ? heatmapCollection(heatmapResponse) : null),
     [heatmapResponse],
+  );
+
+  const recordSliderTiming = useCallback((durationMs: number) => {
+    sliderSamples.current.push(durationMs);
+    if (sliderSamples.current.length >= 100) {
+      const window100 = sliderSamples.current.slice(-100);
+      const avg = window100.reduce((acc, v) => acc + v, 0) / window100.length;
+      const worst = Math.max(...window100);
+      console.info(
+        `[heatmap perf] Average: ${avg.toFixed(3)} ms, Worst: ${worst.toFixed(3)} ms over 100 slider moves`,
+      );
+      sliderSamples.current = [];
+    }
+  }, []);
+
+  const applyHeatmapHour = useCallback(
+    (hour: number) => {
+      const map = mapRef.current?.getMap();
+      if (!map || !map.isStyleLoaded()) return;
+
+      const t0 = performance.now();
+      if (map.getLayer(HEATMAP_LAYER)) {
+        map.setPaintProperty(HEATMAP_LAYER, "heatmap-weight", heatmapWeightExpression(hour));
+      }
+      if (map.getLayer(HEATMAP_CIRCLE_LAYER)) {
+        map.setPaintProperty(HEATMAP_CIRCLE_LAYER, "circle-color", heatmapColorExpression(hour));
+      }
+      const elapsed = performance.now() - t0;
+      recordSliderTiming(elapsed);
+      if (perfEnabled) {
+        setPerfSliderMs(elapsed);
+      }
+    },
+    [perfEnabled, recordSliderTiming],
+  );
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      setHeatmapHour(hour: number) {
+        applyHeatmapHour(hour);
+      },
+      runBenchmark(moves = 100) {
+        console.info(`[heatmap perf] Running ${moves} slider updates benchmark...`);
+        for (let i = 0; i < moves; i++) {
+          applyHeatmapHour(i % 49);
+        }
+      },
+    }),
+    [applyHeatmapHour],
   );
 
   useEffect(() => {
@@ -471,148 +518,73 @@ export function RouteMap({
     const existingHeatmapSource = map.getSource(HEATMAP_SOURCE);
     if (!existingHeatmapSource) {
       map.addSource(HEATMAP_SOURCE, { type: "geojson", data: heatmapData ?? EMPTY_HEATMAP });
-    } else if (!heatmapData && existingHeatmapSource instanceof GeoJSONSource) {
-      existingHeatmapSource.setData(EMPTY_HEATMAP);
+    } else if (existingHeatmapSource instanceof GeoJSONSource) {
+      existingHeatmapSource.setData(heatmapData ?? EMPTY_HEATMAP);
     }
+
     if (!map.getLayer(HEATMAP_LAYER)) {
-      map.addLayer({
-        id: HEATMAP_LAYER,
-        type: "heatmap",
-        source: HEATMAP_SOURCE,
-        minzoom: 3,
-        // Forecast symbols start at zoom 6, where the blended glow ends.
-        maxzoom: 6,
-        paint: {
-          "heatmap-weight": [
-            "case",
-            ["boolean", ["get", "weather_missing"], false], 0,
-            ["interpolate", ["linear"], ["get", "heat_weight"],
-              0, 0, 1, 0.3, 2, 0.6, 3, 0.85, 4, 1],
-          ],
-          "heatmap-intensity": ["interpolate", ["linear"], ["zoom"], 3, 1.25, 4, 1.3, 9, 1.2, 14, 1],
-          "heatmap-radius": ["interpolate", ["linear"], ["zoom"], 3, 30, 4, 28, 6, 23, 9, 16, 11, 11, 13, 8, 14, 6],
-          "heatmap-opacity": ["interpolate", ["linear"], ["zoom"], 0, 1, 14, 1],
-          "heatmap-color": [
-            "interpolate", ["linear"], ["heatmap-density"],
-            0, "rgba(0,0,0,0)",
-            0.3, "#e3b323",
-            0.6, getRiskColor("High"),
-            0.85, getRiskColor("Severe"),
-            1, getRiskColor("No Travel"),
-          ],
-        } as unknown as Record<string, unknown>,
-      }, firstRouteLayer);
+      map.addLayer(
+        {
+          id: HEATMAP_LAYER,
+          type: "heatmap",
+          source: HEATMAP_SOURCE,
+          minzoom: 3,
+          maxzoom: 8,
+          paint: {
+            "heatmap-weight": heatmapWeightExpression(0),
+            "heatmap-intensity": ["interpolate", ["linear"], ["zoom"], 3, 1.25, 4, 1.3, 8, 1.1],
+            "heatmap-radius": ["interpolate", ["linear"], ["zoom"], 3, 24, 6, 20, 8, 16],
+            "heatmap-opacity": 0.85,
+            "heatmap-color": [
+              "interpolate", ["linear"], ["heatmap-density"],
+              0, "rgba(0,0,0,0)",
+              0.2, getRiskColor("Low"),
+              0.4, getRiskColor("Moderate"),
+              0.6, getRiskColor("High"),
+              0.8, getRiskColor("Severe"),
+              1, getRiskColor("No Travel"),
+            ],
+          } as unknown as Record<string, unknown>,
+        },
+        firstRouteLayer,
+      );
     }
+
     if (!map.getLayer(HEATMAP_CIRCLE_LAYER)) {
-      map.addLayer({
-        id: HEATMAP_CIRCLE_LAYER,
-        type: "symbol",
-        source: HEATMAP_SOURCE,
-        minzoom: 6,
-        filter: ["all", ["==", ["get", "weather_missing"], false], [">", ["get", "risk_level"], 0], ["==", ["get", "near_checkpoint"], false]],
-        layout: {
-          "icon-image": ["get", "marker_image"],
-          "icon-size": 0.67,
-          "icon-allow-overlap": true,
-          "icon-ignore-placement": true,
+      map.addLayer(
+        {
+          id: HEATMAP_CIRCLE_LAYER,
+          type: "circle",
+          source: HEATMAP_SOURCE,
+          minzoom: 5,
+          paint: {
+            "circle-radius": ["interpolate", ["linear"], ["zoom"], 5, 3.5, 8, 5.5, 14, 8],
+            "circle-color": heatmapColorExpression(0),
+            "circle-stroke-color": getThemeToken("--surface"),
+            "circle-stroke-width": 1.5,
+            "circle-opacity": 0.95,
+          },
         },
-      }, firstRouteLayer);
+        firstRouteLayer,
+      );
     }
-    if (!map.getLayer(HEATMAP_LOW_CIRCLE_LAYER)) {
-      map.addLayer({
-        id: HEATMAP_LOW_CIRCLE_LAYER,
-        type: "circle",
-        source: HEATMAP_SOURCE,
-        minzoom: 6,
-        filter: ["all", ["==", ["get", "weather_missing"], false], ["==", ["get", "risk_level"], 0], ["==", ["get", "near_checkpoint"], false]],
-        paint: {
-          "circle-radius": 2.5,
-          "circle-color": getRiskColor("No data"),
-          "circle-opacity": 0.85,
-        },
-      }, firstRouteLayer);
+
+    for (const obsolete of ["forecast-risk-low-circles", "forecast-risk-missing"]) {
+      if (map.getLayer(obsolete)) map.removeLayer(obsolete);
     }
-    if (!map.getLayer(HEATMAP_MISSING_LAYER)) {
-      map.addLayer({
-        id: HEATMAP_MISSING_LAYER,
-        type: "symbol",
-        source: HEATMAP_SOURCE,
-        minzoom: 7,
-        filter: ["all", ["==", ["get", "weather_missing"], true], ["==", ["get", "near_checkpoint"], false]],
-        layout: {
-          "icon-image": ["get", "marker_image"],
-          "icon-size": 0.67,
-          "icon-allow-overlap": true,
-          "icon-ignore-placement": true,
-        },
-      }, firstRouteLayer);
-    }
-    for (const layerId of [HEATMAP_LAYER, HEATMAP_CIRCLE_LAYER, HEATMAP_LOW_CIRCLE_LAYER, HEATMAP_MISSING_LAYER]) {
-      map.setLayoutProperty(layerId, "visibility", heatmapEnabled ? "visible" : "none");
-    }
-    // Keep the density glow under routes, but put discrete forecast symbols
-    // above route strokes so they remain legible on short, tightly sampled trips.
-    for (const layerId of [HEATMAP_CIRCLE_LAYER, HEATMAP_LOW_CIRCLE_LAYER, HEATMAP_MISSING_LAYER]) {
-      if (map.getLayer(layerId) && map.getLayer(CHECKPOINT_LAYER)) {
-        map.moveLayer(layerId, CHECKPOINT_LAYER);
+
+    for (const layerId of [HEATMAP_LAYER, HEATMAP_CIRCLE_LAYER]) {
+      if (map.getLayer(layerId)) {
+        map.setLayoutProperty(layerId, "visibility", heatmapEnabled ? "visible" : "none");
       }
     }
-  }, [loaded, heatmapData, heatmapEnabled, styleRevision]);
 
-  useEffect(() => {
-    const map = mapRef.current?.getMap();
-    if (!loaded || !map || !heatmapData) return;
-    let frame = 0;
-    frame = window.requestAnimationFrame(() => {
-      const source = map.getSource(HEATMAP_SOURCE);
-      if (!(source instanceof GeoJSONSource)) return;
-      updateHeatmapFeatureState(map, heatmapData, heatmapHour, selectedRoute);
-      if (perfEnabled) {
-        const id = ++heatmapMeasureId.current;
-        const startMark = `heatmap-setdata-start-${id}`;
-        const endMark = `heatmap-setdata-end-${id}`;
-        const measureName = `heatmap-slider-setdata-${id}`;
-        performance.mark(startMark);
-        source.setData(heatmapData);
-        performance.mark(endMark);
-        performance.measure(measureName, startMark, endMark);
-        const duration = performance.getEntriesByName(measureName, "measure").at(-1)?.duration ?? 0;
-        setPerfSliderMs(duration);
-        console.info(`[heatmap perf] slider setData: ${duration.toFixed(2)} ms`);
-        performance.clearMarks(startMark);
-        performance.clearMarks(endMark);
-        performance.clearMeasures(measureName);
-      } else {
-        source.setData(heatmapData);
-      }
-    });
-    return () => window.cancelAnimationFrame(frame);
-  }, [loaded, heatmapData, heatmapHour, perfEnabled, selectedRoute, styleRevision]);
+    if (map.getLayer(HEATMAP_CIRCLE_LAYER) && map.getLayer(CHECKPOINT_LAYER)) {
+      map.moveLayer(HEATMAP_CIRCLE_LAYER, CHECKPOINT_LAYER);
+    }
 
-  useEffect(() => {
-    const map = mapRef.current?.getMap();
-    if (!loaded || !map || !heatmapData) return;
-    let frame = 0;
-    const refreshProximity = () => {
-      window.cancelAnimationFrame(frame);
-      frame = window.requestAnimationFrame(() => {
-        const source = map.getSource(HEATMAP_SOURCE);
-        if (!(source instanceof GeoJSONSource)) return;
-        updateHeatmapFeatureState(map, heatmapData, heatmapHour, selectedRoute);
-        source.setData(heatmapData);
-      });
-    };
-    map.on("zoomend", refreshProximity);
-    map.on("rotateend", refreshProximity);
-    map.on("pitchend", refreshProximity);
-    refreshProximity();
-    return () => {
-      window.cancelAnimationFrame(frame);
-      map.off("zoomend", refreshProximity);
-      map.off("rotateend", refreshProximity);
-      map.off("pitchend", refreshProximity);
-    };
-  }, [loaded, heatmapData, heatmapHour, selectedRoute, styleRevision]);
+    applyHeatmapHour(0);
+  }, [loaded, heatmapData, heatmapEnabled, styleRevision, applyHeatmapHour]);
 
   useEffect(() => {
     const map = mapRef.current?.getMap();
@@ -709,7 +681,7 @@ export function RouteMap({
       {perfEnabled && (
         <aside className="heatmap-perf" aria-label="Heatmap performance measurements">
           <strong>Heatmap performance</strong>
-          <span>Slider setData: {perfSliderMs === null ? "—" : `${perfSliderMs.toFixed(2)} ms`}</span>
+          <span>Slider paint update: {perfSliderMs === null ? "—" : `${perfSliderMs.toFixed(3)} ms`}</span>
           <span>Request body: {heatmapRequestBytes === null ? "—" : `${(heatmapRequestBytes / 1024).toFixed(1)} KB`}</span>
           <span>Response body: {heatmapResponseBytes === null ? "—" : `${(heatmapResponseBytes / 1024).toFixed(1)} KB`}</span>
           <span>Request to first render: {perfFirstRenderMs === null ? "—" : `${perfFirstRenderMs.toFixed(1)} ms`}</span>
@@ -717,4 +689,4 @@ export function RouteMap({
       )}
     </div>
   );
-}
+});
