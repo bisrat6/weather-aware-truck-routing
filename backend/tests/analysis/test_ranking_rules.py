@@ -1,10 +1,12 @@
 """Ranking rules from PROJECT_GUIDE.md section 5, plus the documented missing-data rules."""
 
 import json
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 
 from analysis import RouteResult, RouteSummary, analyze_route, rank_routes
+from analysis.scoring import _risk_rank_key
 from risk import RiskLevel
 from routing.mapbox import parse_routes
 from routing.models import Route
@@ -193,3 +195,34 @@ def test_reason_names_whole_minute_duration_when_duration_decides():
     reason = rank_routes([slower, faster]).reason
     assert reason.startswith("1 min shorter")
     assert "tie" not in reason.lower()
+
+
+def test_stability_counts_do_not_affect_order_or_reason():
+    plain = summary_result("first", {RiskLevel.SEVERE: 2, RiskLevel.LOW: 98}, avg=1.0)
+    flagged = summary_result("second", {RiskLevel.SEVERE: 2, RiskLevel.LOW: 98}, avg=1.0)
+    flagged = RouteResult(
+        (),
+        replace(flagged.summary, unstable_checkpoints=7, unknown_stability_checkpoints=3),
+        "second",
+    )
+    forward = rank_routes([plain, flagged])
+    backward = rank_routes([flagged, plain])
+    assert forward.ranked_results == (plain, flagged)
+    assert backward.ranked_results == (flagged, plain)
+    assert forward.reason == backward.reason
+    assert "tie" in forward.reason.lower()
+
+
+def test_average_risk_within_rounding_is_a_tie_and_duration_decides():
+    slower = summary_result("slower", {RiskLevel.LOW: 1}, avg=1.0001, duration=1260)
+    faster = summary_result("faster", {RiskLevel.LOW: 1}, avg=1.0049, duration=1200)
+    ranking = rank_routes([slower, faster])
+    assert ranking.recommended is faster
+    assert "average" not in ranking.reason.lower()
+
+
+def test_miles_round_half_to_even_at_half_mile_boundaries():
+    # Python round() is banker's rounding: 0.5 -> 0, 1.5 -> 2, 2.5 -> 2. Documented, not accidental.
+    for exact, expected in ((0.5, 0), (1.5, 2), (2.5, 2)):
+        route = summary_result("r", {RiskLevel.SEVERE: exact})
+        assert _risk_rank_key(route)[1] == expected

@@ -208,7 +208,9 @@ def _reason(best: RouteResult, other: RouteResult) -> str:
 
 
 def rank_routes(results: Sequence[RouteResult]) -> RouteRanking:
-    """Prefer complete weather, then apply No Travel, Severe, High, average, duration."""
+    """Blocked (No Travel) routes rank last, then routes with incomplete weather, then
+    No Travel, Severe and High miles (whole miles), average risk (2 decimals), and
+    duration (whole minutes)."""
     if not results:
         raise ValueError("at least one route result is required")
     ordered = tuple(sorted(results, key=_rank_key))
