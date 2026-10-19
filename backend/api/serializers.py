@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from analysis.models import CheckpointResult, RouteResult
 from risk import RiskLevel
 from routing.models import Route
+from routing.simplify import simplify_coords
 
 _LEVEL_NAMES = {
     RiskLevel.LOW: "Low",
@@ -49,11 +50,12 @@ def serialize_checkpoint(checkpoint: CheckpointResult) -> dict[str, object]:
 
 def serialize_route(index: int, route: Route, result: RouteResult) -> dict[str, object]:
     summary = result.summary
+    display_coords = simplify_coords(route.coords)
     return {
         "route_index": index,
         "origin_label": route.origin_label,
         "geometry": {
-            "coordinates": [[lon, lat] for lat, lon in route.coords],
+            "coordinates": [[lon, lat] for lat, lon in display_coords],
         },
         "distance_mi": route.distance_m / 1609.344,
         "duration_s": route.duration_s,
