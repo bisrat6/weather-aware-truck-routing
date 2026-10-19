@@ -50,7 +50,12 @@ def test_health_rejects_non_get_methods(client, method):
 
 
 def test_unknown_api_path_is_404(client):
-    assert client.get("/api/nope").status_code == 404
+    response = client.get("/api/nope")
+    assert response.status_code == 404
+    assert response.json() == {
+        "error": {"code": "not_found", "message": "The requested resource was not found."}
+    }
+    assert response["Content-Type"].startswith("application/json")
 
 
 def test_wsgi_application_serves_health():

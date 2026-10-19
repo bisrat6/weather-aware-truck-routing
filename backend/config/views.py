@@ -1,5 +1,6 @@
-"""Views that do not belong to a feature."""
+"""Views and safe error handlers that do not belong to a feature."""
 
+from django.http import HttpRequest, JsonResponse
 from rest_framework.decorators import (
     api_view,
     authentication_classes,
@@ -18,3 +19,24 @@ from rest_framework.response import Response
 def health(request: Request) -> Response:
     """Liveness check for the hosting platform. Touches nothing but the process."""
     return Response({"status": "ok"})
+
+
+def json_not_found(request: HttpRequest, exception: Exception | None = None) -> JsonResponse:
+    """Return the documented error envelope for URLs outside the API."""
+    return JsonResponse(
+        {"error": {"code": "not_found", "message": "The requested resource was not found."}},
+        status=404,
+    )
+
+
+def json_server_error(request: HttpRequest) -> JsonResponse:
+    """Do not expose exception details in production error responses."""
+    return JsonResponse(
+        {
+            "error": {
+                "code": "server_error",
+                "message": "The server could not complete the request.",
+            }
+        },
+        status=500,
+    )
