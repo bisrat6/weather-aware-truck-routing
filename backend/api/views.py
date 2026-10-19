@@ -28,6 +28,7 @@ from api.validation import (
     validate_geocode_query,
 )
 from routing.errors import MapboxError, MapboxNoRouteError, MapboxRateLimitError
+from routing.fallback import augment_routes
 from routing.mapbox import get_routes
 from weather.errors import WeatherError, WeatherRateLimitError
 from weather.service import WeatherService
@@ -88,6 +89,15 @@ def analyze(request: Request) -> Response:
             ) from None
         raise APIError("routing_unavailable", "Route service is unavailable.", 502) from None
 
+    # Best effort and never raises: returns the provider routes unchanged on any failure.
+    routes, fallback = augment_routes(
+        routes,
+        origin,
+        destination,
+        settings.MAPBOX_TOKEN,
+        truck_time_factor=settings.TRUCK_TIME_FACTOR,
+    )
+
     try:
         results = [
             analyze_route(
@@ -112,7 +122,14 @@ def analyze(request: Request) -> Response:
     route_indices = {id(result): index for index, result in enumerate(results)}
     notices = []
     if len(routes) < 3:
-        notices.append(f"Only {len(routes)} routes available from the provider")
+        if fallback.attempted:
+            notices.append(
+                f"Only {len(routes)} routes available (the provider returned "
+                f"{fallback.provider_count}; the detour search found "
+                f"{fallback.accepted} acceptable)"
+            )
+        else:
+            notices.append(f"Only {len(routes)} routes available from the provider")
     recommended_summary = ranking.recommended.summary
     if recommended_summary.blocked:
         notices.append("Recommended route is blocked because it contains a No Travel checkpoint")

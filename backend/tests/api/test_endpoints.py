@@ -4,8 +4,19 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
+import requests
 from django.test import override_settings
 from rest_framework.test import APIClient
+
+from tests.fallback_support import (
+    EXCLUDE,
+    MAIN,
+    Directions,
+    first_route_only,
+    load_payload,
+    scaled,
+    with_routes,
+)
 
 FIXTURES = Path(__file__).parents[1] / "fixtures"
 TOKEN = "test-token-do-not-leak"
@@ -135,7 +146,8 @@ def test_analyze_happy_path_uses_recorded_fixtures_and_provider_notice(client, m
     assert "unstable_checkpoints" in data["routes"][0]["summary"]
     assert "unknown_stability_checkpoints" in data["routes"][0]["summary"]
     assert data["notices"] == [
-        f"Only {len(data['routes'])} routes available from the provider"
+        f"Only {len(data['routes'])} routes available (the provider returned 2; "
+        "the detour search found 0 acceptable)"
     ]
 
 
@@ -417,3 +429,97 @@ def test_gzip_compression_returns_identical_json_payload(client, monkeypatch):
     decompressed_bytes = gzip.decompress(compressed.content)
     assert json.loads(decompressed_bytes.decode("utf-8")) == uncompressed.json()
 
+
+
+# ------------------------------------------------------------------ third-route fallback
+
+
+def mock_directions_and_weather(monkeypatch, directions):
+    def get(url, params=None, timeout=None):
+        if "directions/v5" in url:
+            return directions(url, params, timeout)
+        if "open-meteo.com" in url:
+            return weather_response(params)
+        raise AssertionError(f"unexpected upstream {url}")
+
+    monkeypatch.setattr("requests.get", get)
+
+
+def test_analyze_returns_fallback_route_with_its_origin_label(client, monkeypatch):
+    directions = Directions(
+        {"main": load_payload(MAIN), "exclude": scaled(load_payload(EXCLUDE), duration=0.5)},
+        default=(500, {}),
+    )
+    mock_directions_and_weather(monkeypatch, directions)
+    data = client.post("/api/analyze", body(), format="json").json()
+    assert [r["origin_label"] for r in data["routes"]] == [
+        "provider alternative",
+        "provider alternative",
+        "avoiding motorways",
+    ]
+    assert sorted(data["ranking"]) == [0, 1, 2]
+    assert data["notices"] == []
+
+
+@pytest.mark.parametrize(
+    "failure", [requests.Timeout("slow"), (429, {"message": "limit"}), (500, {})]
+)
+def test_analyze_still_returns_main_result_when_every_fallback_request_fails(
+    client, monkeypatch, failure
+):
+    directions = Directions({"main": load_payload(MAIN)}, default=failure)
+    mock_directions_and_weather(monkeypatch, directions)
+    response = client.post("/api/analyze", body(), format="json")
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data["routes"]) == 2
+    assert data["notices"] == [
+        "Only 2 routes available (the provider returned 2; the detour search found 0 acceptable)"
+    ]
+    assert len(directions.extra_calls) <= 5
+
+
+def test_analyze_notice_counts_provider_and_accepted_routes(client, monkeypatch):
+    directions = Directions(
+        {
+            "main": first_route_only(load_payload(MAIN)),
+            "exclude": first_route_only(scaled(load_payload(EXCLUDE), duration=0.5)),
+        },
+        default=(500, {}),
+    )
+    mock_directions_and_weather(monkeypatch, directions)
+    data = client.post("/api/analyze", body(), format="json").json()
+    assert [r["origin_label"] for r in data["routes"]] == [
+        "provider alternative",
+        "avoiding motorways",
+    ]
+    assert data["notices"] == [
+        "Only 2 routes available (the provider returned 1; the detour search found 1 acceptable)"
+    ]
+
+
+def test_analyze_makes_no_fallback_requests_when_provider_returns_three(client, monkeypatch):
+    directions = Directions({"main": with_routes(load_payload(MAIN), 3)})
+    mock_directions_and_weather(monkeypatch, directions)
+    data = client.post("/api/analyze", body(), format="json").json()
+    assert len(data["routes"]) == 3
+    assert directions.calls == ["main"]
+    assert data["notices"] == []
+
+
+def test_failed_fallback_does_not_change_ranking(client, monkeypatch):
+    def analyze(directions, patch_identity=False):
+        mock_directions_and_weather(monkeypatch, directions)
+        if patch_identity:
+            from routing.fallback import FallbackReport
+
+            monkeypatch.setattr(
+                "api.views.augment_routes",
+                lambda routes, *a, **k: (list(routes), FallbackReport(len(routes))),
+            )
+        data = client.post("/api/analyze", body(), format="json").json()
+        return {k: data[k] for k in ("routes", "ranking", "recommended", "recommendation_reason")}
+
+    with_failed_fallback = analyze(Directions({"main": load_payload(MAIN)}, default=(500, {})))
+    without_fallback = analyze(Directions({"main": load_payload(MAIN)}), patch_identity=True)
+    assert with_failed_fallback == without_fallback

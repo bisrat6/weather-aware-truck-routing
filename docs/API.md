@@ -102,8 +102,16 @@ levels were assessed and match the base, and `null` when no flip is known and a 
 (or the base) cannot be assessed because weather is missing or outside the forecast window. Summary
 counts include true flags in `unstable_checkpoints` and unknown flags in
 `unknown_stability_checkpoints`. Stability does not affect route ranking or recommendation.
-When fewer than three routes are returned, `notices` includes
-`"Only N routes available from the provider"`. No synthetic route is added.
+`origin_label` is one of `"provider alternative"`, `"avoiding motorways"`,
+`"forced detour, left of the main route"` or `"forced detour, right of the main route"`
+(left and right are relative to the direction of travel; no place names).
+When the provider returns fewer than three routes, the server makes up to 5 extra Mapbox
+requests to look for a third acceptable route (see ASSUMPTIONS.md, "Third-route fallback").
+Extra routes use the same weather, scoring and ranking as provider routes. If fewer than three
+routes remain, `notices` includes `"Only N routes available (the provider returned M; the
+detour search found K acceptable)"`. No synthetic route is added, and a fallback failure,
+timeout or rate limit never fails the request. No extra requests are made when the provider
+returns three routes.
 `notices` also includes a plain-language warning if the recommended route contains any
 No Travel checkpoint or has missing weather data; the latter gives missing miles and
 checkpoint count. `recommendation_reason` names the criterion that decided the ranking
