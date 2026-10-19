@@ -186,11 +186,26 @@ def _usable_annotation(
     return [v for v in dist if v is not None], [v for v in dur if v is not None]
 
 
-def _apportion(total: float, weights: Sequence[float]) -> list[float]:
-    """Split `total` across segments in proportion to `weights` (equally if all zero)."""
+# Distances below 1 millimetre (1e-3 m) are negligible for road routing.
+# When total weight is negligible or zero, weights cannot provide a physically meaningful
+# proportional breakdown and can suffer from subnormal floating-point underflow.
+NEGLIGIBLE_DISTANCE_M = 1e-3
+
+
+def _apportion(
+    total: float,
+    weights: Sequence[float],
+    *,
+    min_weight_sum: float = NEGLIGIBLE_DISTANCE_M,
+) -> list[float]:
+    """Split `total` across segments in proportion to `weights` (equally if negligible or zero)."""
+    if not weights:
+        return []
+    if len(weights) == 1:
+        return [total]
     weight_sum = math.fsum(weights)
-    if weight_sum > 0:
-        return [total * w / weight_sum for w in weights]
+    if weight_sum > min_weight_sum:
+        return [(w / weight_sum) * total for w in weights]
     return [total / len(weights)] * len(weights)
 
 
@@ -217,10 +232,12 @@ def _build_leg(
         if provider_dur is None:
             raise MapboxResponseError("leg has no usable annotations and no duration to apportion")
         geodesic = segment_lengths_m(coords)
-        total_dist = provider_dist if provider_dist is not None else math.fsum(geodesic)
+        geo_len = math.fsum(geodesic)
+        total_dist = provider_dist if provider_dist is not None else geo_len
         total_dur = provider_dur * factor
         seg_dist = _apportion(total_dist, geodesic)
-        seg_dur = _apportion(total_dur, seg_dist)
+        dur_weights = geodesic if geo_len > NEGLIGIBLE_DISTANCE_M else seg_dist
+        seg_dur = _apportion(total_dur, dur_weights)
         method = "proportional"
         logger.warning(
             "annotation unusable for a leg with %d segments; using proportional durations",

@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 import requests
-from hypothesis import given
+from hypothesis import example, given
 from hypothesis import strategies as st
 
 from routing import mapbox
@@ -512,6 +512,29 @@ def payloads(draw):
     return {"code": "Ok", "routes": [route]}, mode
 
 
+@example(
+    case=(
+        {
+            "code": "Ok",
+            "routes": [
+                {
+                    "distance": 5e-324,
+                    "duration": 1.5,
+                    "geometry": {"coordinates": [[0.0, 0.0], [0.0, 0.0]]},
+                    "legs": [
+                        {
+                            "distance": 5e-324,
+                            "duration": 1.5,
+                            "annotation": {"distance": [], "duration": []},
+                        }
+                    ],
+                }
+            ],
+        },
+        "short",
+    ),
+    factor=1.0,
+)
 @given(payloads(), st.floats(min_value=0.5, max_value=3.0))
 def test_parsed_routes_always_aligned_and_monotonic(case, factor):
     payload, mode = case
@@ -525,6 +548,52 @@ def test_parsed_routes_always_aligned_and_monotonic(case, factor):
         r = payload["routes"][0]
         assert route.cum_dist_m[-1] == pytest.approx(r["distance"], rel=1e-9, abs=1e-6)
         assert route.cum_dur_s[-1] == pytest.approx(r["duration"] * factor, rel=1e-9, abs=1e-6)
+
+
+def test_proportional_split_subnormal_distance_underflow():
+    payload = {
+        "code": "Ok",
+        "routes": [
+            {
+                "distance": 5e-324,
+                "duration": 1.5,
+                "geometry": {"coordinates": [[0.0, 0.0], [0.0, 0.0]]},
+                "legs": [
+                    {
+                        "distance": 5e-324,
+                        "duration": 1.5,
+                        "annotation": {"distance": [], "duration": []},
+                    }
+                ],
+            }
+        ],
+    }
+    (route,) = parse_routes(payload, truck_time_factor=1.0)
+    assert route.eta_method == "proportional"
+    assert route.cum_dist_m == pytest.approx([0.0, 5e-324], abs=1e-320)
+    assert route.cum_dur_s == pytest.approx([0.0, 1.5])
+    assert route.cum_dur_s[-1] == pytest.approx(1.5)
+
+
+def test_proportional_split_tiny_nonzero_distance():
+    payload = {
+        "code": "Ok",
+        "routes": [
+            {
+                "distance": 1e-9,
+                "duration": 2.0,
+                "geometry": {"coordinates": [[0.0, 0.0], [0.0, 0.0], [0.0, 0.0]]},
+                "legs": [{"distance": 1e-9, "duration": 2.0}],
+            }
+        ],
+    }
+    (route,) = parse_routes(payload, truck_time_factor=1.1)
+    assert route.eta_method == "proportional"
+    assert len(route.coords) == 3
+    assert route.cum_dist_m == pytest.approx([0.0, 5e-10, 1e-9])
+    assert route.cum_dur_s == pytest.approx([0.0, 1.1, 2.2])
+    assert route.cum_dur_s[-1] == pytest.approx(2.0 * 1.1)
+
 
 
 def test_segment_lengths_helper_is_used_for_proportional_split():
