@@ -40,7 +40,7 @@ class Route:
     distance_m: float
     duration_s: float
     eta_method: EtaMethod
-    # "provider alternative", "avoiding motorways" or "forced detour, left|right of the main route"
+    # "HERE route"
     origin_label: str
 
     def __post_init__(self) -> None:

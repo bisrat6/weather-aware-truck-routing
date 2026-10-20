@@ -1,9 +1,10 @@
-# Weather-Aware Truck Routing
+# RouteCast — Weather-Aware Truck Routing
 
 Recommends the safest truck route between two North American locations by combining turn-by-turn routing with hourly weather forecasts sampled at route checkpoints. Route options are scored against configurable risk thresholds and truck load rules, with an interactive corridor weather heatmap across a 48-hour departure window.
 
 ### Try It
 - Live application: https://weather-aware-truck-routing-1-og3f.onrender.com
+- Offline sample trip: Visit https://weather-aware-truck-routing-1-og3f.onrender.com/?demo=sample (or append `?demo=sample` locally) to reveal the "Load Sample Trip" button in the Trip form header. Clicking it instantly loads a pre-computed Salt Lake City to Provo route, checkpoints, and 48-hour heatmap data without external API calls.
 - Hosting note: The free Render web service spins down after 15 minutes of inactivity. Initial page load and first query can take up to 60 seconds while the backend wakes up (the UI displays a "waking up" notice during startup).
 - TODO: screenshots (route comparison view, corridor heatmap with 0-48 h time slider, checkpoint risk popup).
 
@@ -12,7 +13,7 @@ Recommends the safest truck route between two North American locations by combin
 | Requirement | Status | Where (file or module) |
 |---|---|---|
 | Inputs (origin, destination, departure, load, interval) | Done | `backend/api/validation.py`, `frontend/src/PlacePicker.tsx` |
-| 3 route options | Partial | `backend/routing/here.py` (fallback spec in `backend/routing/fallback.py`) |
+| 3 route options | Done with a limit | `backend/routing/here.py` |
 | Weather every 10/25/50 miles at ETA | Done | `backend/routing/checkpoints.py`, `backend/weather/service.py` |
 | Risk rules and load rules | Done | `backend/risk/engine.py` |
 | Recommendation by the four criteria | Done | `backend/analysis/scoring.py` |
@@ -21,7 +22,7 @@ Recommends the safest truck route between two North American locations by combin
 | Hosted app | Done | Render (Web Service + Static Site; see `docs/DEPLOY.md`) |
 | GitHub repo | Done | Repository root, `.github/workflows/ci.yml` |
 
-For route options, routing providers commonly return only 2 alternatives. The fallback algorithm targets 3 routes by attempting an motorway-avoiding request followed by perpendicular via-detours (left/right at 8% and 16% of total route distance, lateral offset clamped to 1.5–35.0 miles). Extra requests are capped at 5 with a 6.0 s request timeout and an 8.0 s overall search budget. Candidates are rejected if >= 85% of their 0.01-degree grid cells overlap existing routes or if duration or distance exceeds 1.5x the best route. Each route retains its origin label, and the API returns a notice whenever fewer than 3 routes pass checks. A third valid route is not guaranteed.
+Route calculation requests the best route plus up to two alternatives (`alternatives=2`). HERE Routing v8 returns 2 or 3 routes depending on corridor connectivity; observed trips returned 2 or 3. When fewer than 3 routes are returned, the API includes the notice `Only N routes available from the routing provider`. A third route is not always available from the provider.
 
 ## How It Works
 
@@ -29,11 +30,13 @@ Route timing generates checkpoints at 10, 25, or 50-mile intervals. Each checkpo
 
 | Level | Wind (mph) | Rain (in/hr) | Snow (in/hr) | Load Rule Escalation |
 |---|---|---|---|---|
-| Low | < 25 | < 0.10 | < 0.5 | Base wind |
+| Low | < 25 | < 0.10 | < 0.5 | - |
 | Moderate | [25, 35) | [0.10, 0.25) | [0.5, 1.0) | None |
 | High | [35, 45) | [0.25, 0.50) | [1.0, 2.0) | None |
 | Severe | [45, 55) | [0.50, 1.00] | [2.0, 3.0] | Wind [35, 45) and load > 40,000 lb |
 | No Travel | >= 55 | > 1.00 | > 3.0 | Wind [45, 55) and load > 30,000 lb |
+
+Final level is the highest of wind, rain and snow after load escalation. Load rules only raise the level.
 
 Each checkpoint owns half the distance to its adjacent neighbors (`(left + right) / 2`); endpoints own half the first or last interval. Route miles in each risk level equal the sum of owned checkpoint miles.
 
@@ -59,15 +62,15 @@ Checkpoint weather is also sampled at ETA +/- 2 hours. If risk differs at either
                          │               │
            Routing & Geocoding      Weather Queries
                          │               ▼
-               [ Routing Provider ]  [ Cloudflare Worker Proxy ]
-                                         │ (Rate limit & IP protection)
+             [ HERE Technologies ]   [ Cloudflare Worker Proxy ]
+            (Routing v8, Autosuggest)    │ (Rate limit & IP protection)
                                          ▼
                                    [ Open-Meteo API ]
                                          │
                              [ In-Memory GridCache (0.1°) ]
 ```
 
-Open-Meteo requests pass through a Cloudflare Worker proxy. Open-Meteo free tier imposes concurrency limits per source IP, and shared cloud hosting IP pools (such as Render) frequently exhaust this quota without a dedicated egress proxy. The Django process caches weather samples in an in-memory 0.1-degree grid cache (45-minute TTL) across threads. See [docs/API.md](docs/API.md) and [docs/DEPLOY.md](docs/DEPLOY.md).
+Routing and geocoding rely on HERE Technologies (Routing v8 in truck mode, Autosuggest). Open-Meteo requests pass through a Cloudflare Worker proxy. Open-Meteo free tier imposes concurrency limits per source IP, and shared cloud hosting IP pools (such as Render) frequently exhaust this quota without a dedicated egress proxy. The Django process caches weather samples in an in-memory 0.1-degree grid cache (45-minute TTL) across threads. See [docs/API.md](docs/API.md) and [docs/DEPLOY.md](docs/DEPLOY.md).
 
 ## Run It Locally
 
@@ -90,6 +93,8 @@ cd frontend
 npm install
 npm run dev
 ```
+
+Visit `http://localhost:5173/` for live routing or `http://localhost:5173/?demo=sample` for the offline sample trip. In local development, `?demo=levels` is also available to cycle sample risk level styles across map markers.
 
 ### Environment Variables
 - `DJANGO_SECRET_KEY`: Secret key for Django cryptographic signing; required unless `DJANGO_DEBUG=true`.
@@ -156,7 +161,9 @@ Measurement instructions:
 
 ## Limits and Known Issues
 
-- **Route Availability**: Routing providers generally return 2 routes; fallback detours may fail similarity (>= 85%) or distance/duration (>= 1.5x) filters, yielding fewer than 3 options.
+- **Route Availability**: Routing requests `alternatives=2` from HERE; observed trips returned 2 or 3 routes. When fewer than 3 routes are available, the API returns a notice.
+- **Routing Parameters and Traffic**: The route request specifies `transportMode=truck`, but sends no vehicle dimensions or weights (HERE applies legal truck restrictions, not physical height, width, or axle load limits) and no departure time (HERE computes travel times using current traffic, not traffic forecasted at the departure time).
+- **HERE Plan Limits & Place Search**: The free HERE plan has request limits (see HERE's pricing page). The frontend place picker debounces input (300 ms) and aborts in-flight searches using `AbortController`. When HERE rate-limits, the backend maps the response to HTTP 429.
 - **Cold Start Delay**: Free-tier backend hosting on Render idles after 15 minutes, causing a 30–60 second delay on initial load.
 - **Open-Meteo Rate Limits & Overload**: The free API tier is non-commercial. The backend retries HTTP 5xx responses and responses with "overloaded" in body up to 2 times (1 s then 2 s backoff within a 6 s budget); if exhausted, it returns HTTP 502/429.
 - **Attribution**: Weather data provided by [Open-Meteo.com](https://open-meteo.com/) under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
@@ -168,13 +175,12 @@ Measurement instructions:
 
 ## Not Verified / Future Work
 
-- Mapbox terms of service regarding display of route geometries on non-Mapbox map renderers were not reviewed.
+- HERE's terms for displaying route data on a map it does not supply were not checked.
 - Real-weather behaviour under extreme conditions (No Travel, severe snow) was exercised in tests and dev demo mode (`?demo=levels`), but has not been verified against live severe weather events.
-- Active provider in current codebase uses HERE Routing v8 truck mode and Autosuggest, whereas earlier revisions and certain brief prompts reference Mapbox Directions and Geocoding.
 
 ## Credits and Licences
 
 - Weather data by [Open-Meteo.com](https://open-meteo.com/) ([CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)).
 - Map tiles by [OpenFreeMap](https://openfreemap.org/) and map data by [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors.
 - Map rendering powered by [MapLibre GL](https://maplibre.org/).
-- Routing and geocoding services by [HERE Technologies](https://www.here.com/) / [Mapbox](https://www.mapbox.com/).
+- Routing and geocoding services by [HERE Technologies](https://www.here.com/).
